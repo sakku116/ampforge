@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "HostDebug.h"
 #include "PluginHost.h"
 
 AudioEngine::AudioEngine(PluginHost& host) : pluginHost(host)
@@ -12,16 +13,30 @@ AudioEngine::~AudioEngine()
 
 void AudioEngine::start()
 {
+    HostDebug::log("AudioEngine::start");
+
     auto error = deviceManager.initialiseWithDefaultDevices(2, 2);
 
     if (error.isNotEmpty())
-        juce::Logger::writeToLog("Audio device init error: " + error);
+    {
+        HostDebug::log("Audio init (2 in / 2 out) failed: " + error + " — trying output only");
+        error = deviceManager.initialiseWithDefaultDevices(0, 2);
+    }
 
-    deviceManager.addAudioCallback(this);
+    if (error.isNotEmpty())
+        HostDebug::log("Audio init error: " + error);
+    else if (auto* device = deviceManager.getCurrentAudioDevice())
+        HostDebug::log("Audio device: " + device->getName() + " | " + device->getTypeName());
+
+    if (deviceManager.getCurrentAudioDevice() != nullptr)
+        deviceManager.addAudioCallback(this);
+    else
+        HostDebug::log("Audio callback not registered — no output device");
 }
 
 void AudioEngine::stop()
 {
+    HostDebug::log("AudioEngine::stop");
     deviceManager.removeAudioCallback(this);
 }
 
@@ -37,9 +52,18 @@ void AudioEngine::restoreDeviceState(const juce::XmlElement* savedState)
     auto error = deviceManager.initialise(2, 2, savedState, true);
 
     if (error.isNotEmpty())
-        juce::Logger::writeToLog("Audio restore error: " + error);
+    {
+        HostDebug::log("Audio restore (2/2) failed: " + error + " — trying output only");
+        error = deviceManager.initialise(0, 2, savedState, true);
+    }
 
-    deviceManager.addAudioCallback(this);
+    if (error.isNotEmpty())
+        HostDebug::log("Audio restore error: " + error);
+    else
+        HostDebug::log("Audio device state restored");
+
+    if (deviceManager.getCurrentAudioDevice() != nullptr)
+        deviceManager.addAudioCallback(this);
 }
 
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChannelData,
@@ -49,10 +73,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
                                                    int numSamples,
                                                    const juce::AudioIODeviceCallbackContext&)
 {
-    processingBuffer.setSize(numOutputChannels, numSamples, false, false, true);
+    const int pluginChannels = pluginHost.getProcessingChannelCount();
+    const int channelsToUse = pluginChannels > 0 ? juce::jmax(numOutputChannels, pluginChannels)
+                                                 : numOutputChannels;
+
+    processingBuffer.setSize(channelsToUse, numSamples, false, false, true);
     processingBuffer.clear();
 
-    for (int ch = 0; ch < numOutputChannels; ++ch)
+    for (int ch = 0; ch < channelsToUse; ++ch)
     {
         if (ch < numInputChannels && inputChannelData[ch] != nullptr)
             processingBuffer.copyFrom(ch, 0, inputChannelData[ch], numSamples);
@@ -71,7 +99,16 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 {
     if (device == nullptr)
+    {
+        HostDebug::log("audioDeviceAboutToStart: device is null");
         return;
+    }
+
+    HostDebug::log("Audio started: " + device->getName()
+                   + " | " + juce::String(device->getCurrentSampleRate(), 1) + " Hz"
+                   + " | buffer " + juce::String(device->getCurrentBufferSizeSamples())
+                   + " | in ch " + juce::String(device->getActiveInputChannels().countNumberOfSetBits())
+                   + " | out ch " + juce::String(device->getActiveOutputChannels().countNumberOfSetBits()));
 
     pluginHost.prepare(device->getCurrentSampleRate(),
                        device->getCurrentBufferSizeSamples(),
@@ -81,4 +118,5 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 
 void AudioEngine::audioDeviceStopped()
 {
+    HostDebug::log("Audio device stopped");
 }

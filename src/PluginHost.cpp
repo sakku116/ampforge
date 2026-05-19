@@ -1,4 +1,6 @@
 #include "PluginHost.h"
+#include "HostDebug.h"
+#include "PluginScanGuard.h"
 
 class PluginHost::PluginEditorWindow : public juce::DocumentWindow
 {
@@ -17,6 +19,11 @@ public:
         {
             setContentOwned(editor, true);
             centreWithSize(editor->getWidth(), editor->getHeight());
+            HostDebug::log("Plugin editor opened: " + instance.getName());
+        }
+        else
+        {
+            HostDebug::log("Plugin editor missing for: " + instance.getName());
         }
 
         setVisible(true);
@@ -41,17 +48,47 @@ PluginHost::~PluginHost()
     unloadPlugin();
 }
 
+void PluginHost::updateProcessingChannelCount()
+{
+    if (pluginInstance == nullptr)
+    {
+        processingChannelCount.store(0);
+        return;
+    }
+
+    processingChannelCount.store(juce::jmax(pluginInstance->getTotalNumInputChannels(),
+                                            pluginInstance->getTotalNumOutputChannels()));
+}
+
+int PluginHost::getProcessingChannelCount() const
+{
+    return processingChannelCount.load();
+}
+
 bool PluginHost::loadPlugin(const juce::PluginDescription& description, double sampleRate, int blockSize)
 {
     juce::ScopedLock lock(pluginLock);
 
-    juce::String error;
+    HostDebug::log("Loading plugin: " + description.name
+                   + " | file: " + description.fileOrIdentifier
+                   + " | " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize));
 
-    auto created = formatManager.createPluginInstance(description, sampleRate, blockSize, error);
+    auto loadOutcome = PluginScanGuard::createPluginInstance(formatManager,
+                                                             description,
+                                                             sampleRate,
+                                                             blockSize);
+
+    if (loadOutcome.crashed)
+    {
+        HostDebug::log("Load CRASHED: " + description.name + " — " + loadOutcome.error);
+        return false;
+    }
+
+    auto created = std::move(loadOutcome.instance);
 
     if (created == nullptr)
     {
-        juce::Logger::writeToLog("Failed to load plugin: " + error);
+        HostDebug::log("Load FAILED: " + description.name + " — " + loadOutcome.error);
         return false;
     }
 
@@ -65,6 +102,12 @@ bool PluginHost::loadPlugin(const juce::PluginDescription& description, double s
 
     currentSampleRate = sampleRate;
     currentBlockSize = blockSize;
+    updateProcessingChannelCount();
+
+    HostDebug::log("Load OK: " + pluginInstance->getName()
+                   + " | in=" + juce::String(pluginInstance->getTotalNumInputChannels())
+                   + " out=" + juce::String(pluginInstance->getTotalNumOutputChannels())
+                   + " | process channels=" + juce::String(processingChannelCount.load()));
 
     return true;
 }
@@ -73,6 +116,9 @@ void PluginHost::unloadPlugin()
 {
     juce::ScopedLock lock(pluginLock);
 
+    if (pluginInstance != nullptr)
+        HostDebug::log("Unloading plugin: " + pluginInstance->getName());
+
     editorWindow.reset();
 
     if (pluginInstance != nullptr)
@@ -80,6 +126,8 @@ void PluginHost::unloadPlugin()
         pluginInstance->releaseResources();
         pluginInstance.reset();
     }
+
+    processingChannelCount.store(0);
 }
 
 bool PluginHost::hasLoadedPlugin() const
@@ -97,11 +145,16 @@ void PluginHost::prepare(double sampleRate, int blockSize, int inputChannels, in
     currentInputChannels = juce::jmax(1, inputChannels);
     currentOutputChannels = juce::jmax(1, outputChannels);
 
+    HostDebug::log("Plugin prepare: " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize)
+                   + ", in=" + juce::String(currentInputChannels) + ", out=" + juce::String(currentOutputChannels));
+
     if (pluginInstance != nullptr)
     {
         pluginInstance->releaseResources();
         pluginInstance->setPlayConfigDetails(currentInputChannels, currentOutputChannels, sampleRate, blockSize);
         pluginInstance->prepareToPlay(sampleRate, blockSize);
+        updateProcessingChannelCount();
+        HostDebug::log("  prepared: " + pluginInstance->getName());
     }
 }
 
@@ -120,7 +173,10 @@ void PluginHost::openEditorWindow()
     juce::ScopedLock lock(pluginLock);
 
     if (pluginInstance == nullptr)
+    {
+        HostDebug::log("Open editor skipped: no plugin loaded");
         return;
+    }
 
     editorWindow = std::make_unique<PluginEditorWindow>(*pluginInstance);
 }

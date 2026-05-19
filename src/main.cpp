@@ -1,5 +1,27 @@
 #include <JuceHeader.h>
+#include "HostDebug.h"
 #include "MainComponent.h"
+
+namespace
+{
+std::unique_ptr<juce::FileLogger> fileLogger;
+
+void setupLogging()
+{
+    auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                      .getChildFile("GuitarVST3Host");
+
+    logDir.createDirectory();
+    const auto logFile = logDir.getChildFile("host.log");
+
+    fileLogger = std::make_unique<juce::FileLogger>(logFile,
+                                                    "=== Guitar VST3 Host session ===",
+                                                    512 * 1024);
+
+    juce::Logger::setCurrentLogger(fileLogger.get());
+    HostDebug::log("Log file: " + logFile.getFullPathName());
+}
+}
 
 class MainWindow : public juce::DocumentWindow
 {
@@ -32,12 +54,18 @@ public:
 
     void initialise(const juce::String&) override
     {
+        setupLogging();
+        HostDebug::log("Application starting");
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
+        HostDebug::log("Main window created");
     }
 
     void shutdown() override
     {
+        HostDebug::log("Application shutting down");
         mainWindow.reset();
+        juce::Logger::setCurrentLogger(nullptr);
+        fileLogger.reset();
     }
 
 private:

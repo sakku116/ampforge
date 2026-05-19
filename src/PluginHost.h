@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 
 class PluginHost
 {
@@ -14,6 +15,7 @@ public:
     void unloadPlugin();
 
     bool hasLoadedPlugin() const;
+    int getProcessingChannelCount() const;
 
     void prepare(double sampleRate, int blockSize, int inputChannels, int outputChannels);
     void processAudio(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages);
@@ -32,6 +34,9 @@ private:
     int currentBlockSize = 512;
     int currentInputChannels = 2;
     int currentOutputChannels = 2;
+    std::atomic<int> processingChannelCount { 0 };
+
+    void updateProcessingChannelCount();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginHost)
 };

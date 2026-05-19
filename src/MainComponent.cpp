@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "HostDebug.h"
 
 MainComponent::MainComponent()
     : audioEngine(pluginHost),
@@ -28,20 +29,27 @@ MainComponent::MainComponent()
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
-    pluginScanner.scanDefaultWindowsVST3Folders();
-    refreshPluginList();
+    HostDebug::log("MainComponent ready — scheduling VST3 scan");
 
-    tryRestoreLastLoadedPlugin();
+    juce::MessageManager::callAsync([this]
+    {
+        pluginScanner.scanDefaultWindowsVST3Folders();
+        refreshPluginList();
+        tryRestoreLastLoadedPlugin();
+    });
 }
 
 MainComponent::~MainComponent()
 {
+    HostDebug::log("MainComponent destroying");
+
     audioSettingsButton.removeListener(this);
     scanButton.removeListener(this);
     loadButton.removeListener(this);
     openEditorButton.removeListener(this);
 
     audioSettingsWindow.reset();
+    pluginHost.unloadPlugin();
     saveAudioDeviceState();
     audioEngine.stop();
     appProperties.saveIfNeeded();
@@ -98,6 +106,7 @@ void MainComponent::buttonClicked(juce::Button* button)
 
     if (button == &scanButton)
     {
+        HostDebug::log("UI: Scan VST3 clicked");
         pluginScanner.scanDefaultWindowsVST3Folders();
         refreshPluginList();
         return;
@@ -108,14 +117,21 @@ void MainComponent::buttonClicked(juce::Button* button)
         auto selected = pluginListBox.getSelectedRow();
 
         if (!juce::isPositiveAndBelow(selected, pluginScanner.getKnownPluginList().getNumTypes()))
+        {
+            HostDebug::log("UI: Load clicked — no valid selection (row " + juce::String(selected) + ")");
             return;
+        }
 
         auto* device = audioEngine.getDeviceManager().getCurrentAudioDevice();
 
         if (device == nullptr)
+        {
+            HostDebug::log("UI: Load clicked — no audio device");
             return;
+        }
 
         auto description = pluginScanner.getKnownPluginList().getTypes()[selected];
+        HostDebug::log("UI: Load clicked — " + description.name);
 
         if (pluginHost.loadPlugin(description,
                                   device->getCurrentSampleRate(),
@@ -128,7 +144,10 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
 
     if (button == &openEditorButton)
+    {
+        HostDebug::log("UI: Open editor clicked");
         pluginHost.openEditorWindow();
+    }
 }
 
 void MainComponent::refreshPluginList()
@@ -137,6 +156,8 @@ void MainComponent::refreshPluginList()
 
     for (const auto& type : pluginScanner.getKnownPluginList().getTypes())
         pluginNames.add(type.name + " [" + type.pluginFormatName + "]");
+
+    HostDebug::log("Plugin list refreshed: " + juce::String(pluginNames.size()) + " row(s)");
 
     pluginListBox.updateContent();
     pluginListBox.repaint();
@@ -163,12 +184,20 @@ void MainComponent::tryRestoreLastLoadedPlugin()
     auto lastPluginIdentifier = settings->getValue(lastPluginIdentifierKey);
 
     if (lastPluginIdentifier.isEmpty())
+    {
+        HostDebug::log("Restore plugin: none saved");
         return;
+    }
+
+    HostDebug::log("Restore plugin: looking for " + lastPluginIdentifier);
 
     auto* device = audioEngine.getDeviceManager().getCurrentAudioDevice();
 
     if (device == nullptr)
+    {
+        HostDebug::log("Restore plugin: aborted — no audio device");
         return;
+    }
 
     const auto& types = pluginScanner.getKnownPluginList().getTypes();
 
@@ -184,10 +213,17 @@ void MainComponent::tryRestoreLastLoadedPlugin()
                                   device->getCurrentBufferSizeSamples()))
         {
             pluginListBox.selectRow(i);
+            HostDebug::log("Restore plugin: OK — " + type.name);
+        }
+        else
+        {
+            HostDebug::log("Restore plugin: FAILED — " + type.name);
         }
 
         return;
     }
+
+    HostDebug::log("Restore plugin: identifier not found in scanned list");
 }
 
 void MainComponent::saveLastLoadedPlugin(const juce::PluginDescription& description)

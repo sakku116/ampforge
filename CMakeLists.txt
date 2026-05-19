@@ -19,6 +19,10 @@ juce_add_gui_app(GuitarVST3Host
     PRODUCT_NAME "Guitar VST3 Host"
 )
 
+juce_add_console_app(GuitarVST3ScanWorker
+    PRODUCT_NAME "Guitar VST3 Scan Worker"
+)
+
 juce_generate_juce_header(GuitarVST3Host)
 
 target_sources(GuitarVST3Host
@@ -32,7 +36,49 @@ target_sources(GuitarVST3Host
         src/PluginHost.cpp
         src/MainComponent.h
         src/MainComponent.cpp
+        src/HostDebug.h
+        src/PluginScanGuard.h
+        src/PluginScanGuard.cpp
+        src/ScanSubprocess.h
+        src/ScanSubprocess.cpp
 )
+
+juce_generate_juce_header(GuitarVST3ScanWorker)
+
+target_sources(GuitarVST3ScanWorker
+    PRIVATE
+        src/scan_worker_main.cpp
+        src/ScanSubprocess.h
+        src/ScanSubprocess.cpp
+)
+
+target_compile_definitions(GuitarVST3ScanWorker
+    PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_PLUGINHOST_VST3=1
+)
+
+target_link_libraries(GuitarVST3ScanWorker
+    PRIVATE
+        juce::juce_audio_processors
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
+add_dependencies(GuitarVST3Host GuitarVST3ScanWorker)
+
+add_custom_command(TARGET GuitarVST3ScanWorker POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:GuitarVST3ScanWorker>"
+        "$<TARGET_FILE_DIR:GuitarVST3Host>/GuitarVST3ScanWorker.exe"
+    COMMENT "Copy scan worker next to host executable"
+)
+
+if(MSVC)
+    target_compile_options(GuitarVST3Host PRIVATE /EHa)
+endif()
 
 # ---------------------------------------------------------------------------
 # ASIO support (optional) — requires Steinberg ASIO SDK

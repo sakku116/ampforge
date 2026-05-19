@@ -4,6 +4,7 @@ project(GuitarVST3Host VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(FetchContent)
 
@@ -133,3 +134,6 @@ target_link_libraries(GuitarVST3Host
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
 )
+
+include(cmake/GenerateClangdCompileDb.cmake)
+guitar_host_export_clangd_compile_db(GuitarVST3Host)

@@ -1,0 +1,9 @@
+# Prefer compile_commands.json from CMake (build/ and project root).
+# Fallback -I paths help headers before the DB is generated.
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    - -std=c++20
+    - -Ibuild/GuitarVST3Host_artefacts/JuceLibraryCode
+    - -Ibuild/_deps/juce-src/modules
+    - -Ibuild/_deps/juce-src/modules/juce_audio_processors/format_types/VST3_SDK

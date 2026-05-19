@@ -1,0 +1,126 @@
+# Build output
+build/
+dist/
+out/
+bin/
+lib/
+
+# Compiled object files
+*.o
+*.obj
+
+# Precompiled headers
+*.gch
+*.pch
+
+# Static & shared libraries
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+*.cmake
+!CMakeLists.txt
+
+# Make
+Makefile.in
+
+# Autotools
+aclocal.m4
+autom4te.cache/
+config.log
+config.status
+configure
+Makefile
+
+# Conan (C++ package manager)
+conan.lock
+conanbuildinfo.*
+conaninfo.txt
+graph_info.json
+
+# vcpkg
+vcpkg_installed/
+
+# Clang
+*.clang-tidy-cache
+
+# Coverage
+*.gcno
+*.gcda
+*.gcov
+lcov.info
+coverage/
+
+# Valgrind
+*.valgrind
+
+# IDE — CLion
+.idea/
+cmake-build-*/
+
+# IDE — Visual Studio
+.vs/
+*.vcxproj.user
+*.VC.db
+*.VC.opendb
+
+# IDE — VS Code
+.vscode/
+*.code-workspace
+
+# IDE — Xcode
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+
+# IDE — Eclipse CDT
+.cproject
+.project
+.settings/
+
+# IDE — Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.creator.user
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+.github/
+agent/

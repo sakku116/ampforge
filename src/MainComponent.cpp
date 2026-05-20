@@ -166,9 +166,9 @@ void MainComponent::refreshPluginList()
 void MainComponent::initialiseSettings()
 {
     juce::PropertiesFile::Options options;
-    options.applicationName = "GuitarVST3Host";
+    options.applicationName = "GtrFxSim";
     options.filenameSuffix = "settings";
-    options.folderName = "GuitarVST3Host";
+    options.folderName = "GtrFxSim";
     options.storageFormat = juce::PropertiesFile::storeAsXML;
 
     appProperties.setStorageParameters(options);

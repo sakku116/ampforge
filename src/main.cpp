@@ -9,7 +9,7 @@ std::unique_ptr<juce::FileLogger> fileLogger;
 void setupLogging()
 {
     auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                      .getChildFile("GuitarVST3Host");
+                      .getChildFile("GtrFxSim");
 
     logDir.createDirectory();
     const auto logFile = logDir.getChildFile("host.log");
@@ -46,7 +46,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
 };
 
-class GuitarVST3HostApplication : public juce::JUCEApplication
+class GtrFxSimApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "Guitar VST3 Host"; }
@@ -72,4 +72,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION(GuitarVST3HostApplication)
+START_JUCE_APPLICATION(GtrFxSimApplication)

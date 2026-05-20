@@ -15,7 +15,7 @@ Minimal desktop VST3 host untuk guitar processing, dibangun dengan JUCE dan C++2
 | **Load plugin** | Satu plugin aktif; disiapkan sesuai sample rate / buffer device |
 | **Editor plugin** | Tombol buka GUI bawaan plugin |
 | **Audio settings** | Pilih driver / device (opsional) |
-| **Persistence** | Plugin terakhir + state audio device disimpan ke `%APPDATA%\GuitarVST3Host\` |
+| **Persistence** | Plugin terakhir + state audio device disimpan ke `%APPDATA%\GtrFxSim\` |
 | **Debug log** | File log persisten untuk troubleshooting |
 
 ---
@@ -26,7 +26,7 @@ Minimal desktop VST3 host untuk guitar processing, dibangun dengan JUCE dan C++2
 2. Jalankan host (perhatikan tanda kutip karena ada spasi di nama exe):
 
 ```bash
-"build/GuitarVST3Host_artefacts/Debug/Guitar VST3 Host.exe"
+"build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe"
 ```
 
 3. Saat startup, scan VST3 berjalan otomatis di background.
@@ -52,10 +52,10 @@ Struktur yang didukung:
 ### Log file
 
 ```
-%APPDATA%\GuitarVST3Host\host.log
+%APPDATA%\GtrFxSim\host.log
 ```
 
-Contoh: `C:\Users\<user>\AppData\Roaming\GuitarVST3Host\host.log`
+Contoh: `C:\Users\<user>\AppData\Roaming\GtrFxSim\host.log`
 
 Semua pesan memakai prefix `[GuitarHost]`. Berguna saat scan gagal, load error, atau masalah audio device.
 
@@ -71,7 +71,7 @@ Semua pesan memakai prefix `[GuitarHost]`. Berguna saat scan gagal, load error, 
 
 ### Artefak build yang wajib ada
 
-Setelah build Debug, di folder `build/GuitarVST3Host_artefacts/Debug/`:
+Setelah build Debug, di folder `build/GtrFxSim_artefacts/Debug/`:
 
 | File | Peran |
 |------|-------|
@@ -98,7 +98,36 @@ Tanpa SDK, build tetap sukses (WASAPI / DirectSound).
 
 ---
 
-## Build dari Source
+## Quick Build & Run dengan Makefile
+
+```bash
+# Build Debug
+make build
+
+# Build Release
+make release
+
+# Run Debug build
+make run
+
+# Run Release build
+make run-release
+
+# Clean build folder
+make clean
+
+# Clean + rebuild
+make rebuild
+
+# Show help
+make help
+```
+
+Lihat `Makefile` di root project untuk daftar semua target.
+
+---
+
+## Build dari Source (manual)
 
 ```bash
 # Configure (sesuaikan generator dengan VS Anda)
@@ -110,7 +139,7 @@ Tanpa SDK, build tetap sukses (WASAPI / DirectSound).
 
 Target yang di-build:
 
-- `GuitarVST3Host` — aplikasi GUI
+- `GtrFxSim` — aplikasi GUI
 - `GuitarVST3ScanWorker` — disalin ke folder output host sebagai `GuitarVST3ScanWorker.exe`
 
 ---

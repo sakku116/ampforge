@@ -53,7 +53,7 @@ autom4te.cache/
 config.log
 config.status
 configure
-Makefile
+# Makefile
 
 # Conan (C++ package manager)
 conan.lock

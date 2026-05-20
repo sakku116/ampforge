@@ -4,6 +4,6 @@ CompileFlags:
   CompilationDatabase: build
   Add:
     - -std=c++20
-    - -Ibuild/GuitarVST3Host_artefacts/JuceLibraryCode
+    - -Ibuild/GtrFxSim_artefacts/JuceLibraryCode
     - -Ibuild/_deps/juce-src/modules
     - -Ibuild/_deps/juce-src/modules/juce_audio_processors/format_types/VST3_SDK

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GuitarVST3Host VERSION 0.1.0 LANGUAGES CXX)
+project(GtrFxSim VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,7 +16,7 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_gui_app(GuitarVST3Host
+juce_add_gui_app(GtrFxSim
     PRODUCT_NAME "Guitar VST3 Host"
 )
 
@@ -24,9 +24,9 @@ juce_add_console_app(GuitarVST3ScanWorker
     PRODUCT_NAME "Guitar VST3 Scan Worker"
 )
 
-juce_generate_juce_header(GuitarVST3Host)
+juce_generate_juce_header(GtrFxSim)
 
-target_sources(GuitarVST3Host
+target_sources(GtrFxSim
     PRIVATE
         src/main.cpp
         src/AudioEngine.h
@@ -68,17 +68,17 @@ target_link_libraries(GuitarVST3ScanWorker
         juce::juce_recommended_warning_flags
 )
 
-add_dependencies(GuitarVST3Host GuitarVST3ScanWorker)
+add_dependencies(GtrFxSim GuitarVST3ScanWorker)
 
 add_custom_command(TARGET GuitarVST3ScanWorker POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:GuitarVST3ScanWorker>"
-        "$<TARGET_FILE_DIR:GuitarVST3Host>/GuitarVST3ScanWorker.exe"
+        "$<TARGET_FILE_DIR:GtrFxSim>/GuitarVST3ScanWorker.exe"
     COMMENT "Copy scan worker next to host executable"
 )
 
 if(MSVC)
-    target_compile_options(GuitarVST3Host PRIVATE /EHa)
+    target_compile_options(GtrFxSim PRIVATE /EHa)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -96,6 +96,7 @@ endif()
 if(NOT ENABLE_ASIO)
     foreach(_candidate
             "${CMAKE_SOURCE_DIR}/asiosdk"
+            "${CMAKE_SOURCE_DIR}/asio"
             "${CMAKE_SOURCE_DIR}/ASIO_SDK"
             "C:/ASIOSDK"
             "C:/Program Files/ASIO SDK")
@@ -111,13 +112,13 @@ set(_juce_asio_flag 0)
 if(ENABLE_ASIO)
     message(STATUS "ASIO enabled. SDK: ${ASIO_SDK_DIR}")
     set(_juce_asio_flag 1)
-    target_include_directories(GuitarVST3Host PRIVATE "${ASIO_SDK_DIR}/common")
+    target_include_directories(GtrFxSim PRIVATE "${ASIO_SDK_DIR}/common")
 else()
     message(STATUS "ASIO not found — building with WASAPI/DirectSound only. "
                    "Set -DASIO_SDK_DIR=<path> to enable ASIO.")
 endif()
 
-target_compile_definitions(GuitarVST3Host
+target_compile_definitions(GtrFxSim
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
@@ -125,7 +126,7 @@ target_compile_definitions(GuitarVST3Host
         JUCE_ASIO=${_juce_asio_flag}
 )
 
-target_link_libraries(GuitarVST3Host
+target_link_libraries(GtrFxSim
     PRIVATE
         juce::juce_audio_utils
         juce::juce_audio_processors
@@ -136,4 +137,4 @@ target_link_libraries(GuitarVST3Host
 )
 
 include(cmake/GenerateClangdCompileDb.cmake)
-guitar_host_export_clangd_compile_db(GuitarVST3Host)
+guitar_host_export_clangd_compile_db(GtrFxSim)

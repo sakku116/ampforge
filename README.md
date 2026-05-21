@@ -88,13 +88,19 @@ Setelah build Debug, di folder `build/GtrFxSim_artefacts/Debug/`:
 
 ### ASIO (opsional)
 
-Letakkan [Steinberg ASIO SDK](https://www.steinberg.net/asiosdk/) di salah satu path:
+Untuk mengaktifkan ASIO, clone SDK ke root project:
 
-- `asiosdk/` di root project
+```bash
+git clone https://github.com/audiosdk/asio.git asio
+```
+
+Atau letakkan [Steinberg ASIO SDK](https://www.steinberg.net/asiosdk/) di salah satu path:
+
+- `asio/` di root project
 - `C:/ASIOSDK`
 - Atau configure dengan `-DASIO_SDK_DIR=<path>`
 
-Tanpa SDK, build tetap sukses (WASAPI / DirectSound).
+Folder `asio/` adalah dependency lokal dan tidak di-commit ke repo ini. Tanpa SDK, build tetap sukses (WASAPI / DirectSound).
 
 ---
 

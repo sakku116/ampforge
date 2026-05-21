@@ -124,3 +124,6 @@ $RECYCLE.BIN/
 
 .github/
 agent/
+
+# Local optional dependencies
+asio/

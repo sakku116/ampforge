@@ -43,6 +43,7 @@ CTestTestfile.cmake
 _deps/
 *.cmake
 !CMakeLists.txt
+!cmake/*.cmake
 
 # Make
 Makefile.in

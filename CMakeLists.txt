@@ -33,6 +33,10 @@ target_sources(GtrFxSim
         src/AudioEngine.cpp
         src/PluginScanner.h
         src/PluginScanner.cpp
+        src/PluginChain.h
+        src/PluginChain.cpp
+        src/Preset.h
+        src/Preset.cpp
         src/PluginHost.h
         src/PluginHost.cpp
         src/MainComponent.h

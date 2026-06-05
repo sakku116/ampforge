@@ -1,6 +1,5 @@
 #include "PluginHost.h"
 #include "HostDebug.h"
-#include "PluginScanGuard.h"
 
 class PluginHost::PluginEditorWindow : public juce::DocumentWindow
 {
@@ -38,145 +37,92 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditorWindow)
 };
 
-PluginHost::PluginHost()
+PluginHost::PluginHost() : chain(formatManager)
 {
     formatManager.addDefaultFormats();
 }
 
 PluginHost::~PluginHost()
 {
-    unloadPlugin();
+    closeAllEditors();
+    chain.clear();
 }
 
-void PluginHost::updateProcessingChannelCount()
+// ── Chain editing ────────────────────────────────────────────────────────────
+bool PluginHost::addPlugin(const juce::PluginDescription& description)
 {
-    if (pluginInstance == nullptr)
+    return chain.addPlugin(description);
+}
+
+void PluginHost::removePlugin(int index)
+{
+    closeAllEditors();   // editors reference instances about to be deleted
+    chain.removePlugin(index);
+}
+
+void PluginHost::movePlugin(int fromIndex, int toIndex)
+{
+    chain.movePlugin(fromIndex, toIndex);   // instances persist, editors stay valid
+}
+
+void PluginHost::setBypass(int index, bool shouldBypass)
+{
+    chain.setBypass(index, shouldBypass);
+}
+
+void PluginHost::clearChain()
+{
+    closeAllEditors();
+    chain.clear();
+}
+
+bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs)
+{
+    closeAllEditors();
+    return chain.rebuildFrom(specs);
+}
+
+// ── Editor ─────────────────────────────────────────────────────────────────
+void PluginHost::openEditorWindow(int index)
+{
+    auto* instance = chain.getInstance(index);
+
+    if (instance == nullptr)
     {
-        processingChannelCount.store(0);
+        HostDebug::log("Open editor skipped: no plugin at slot " + juce::String(index));
         return;
     }
 
-    processingChannelCount.store(juce::jmax(pluginInstance->getTotalNumInputChannels(),
-                                            pluginInstance->getTotalNumOutputChannels()));
+    // One editor window at a time; opening a new slot replaces the previous editor.
+    editorWindow = std::make_unique<PluginEditorWindow>(*instance);
 }
 
-int PluginHost::getProcessingChannelCount() const
+void PluginHost::closeAllEditors()
 {
-    return processingChannelCount.load();
+    editorWindow.reset();
 }
 
-bool PluginHost::loadPlugin(const juce::PluginDescription& description, double sampleRate, int blockSize)
+// ── Backwards-compatible single-plugin API ───────────────────────────────────
+bool PluginHost::loadPlugin(const juce::PluginDescription& description, double, int)
 {
-    juce::ScopedLock lock(pluginLock);
-
-    HostDebug::log("Loading plugin: " + description.name
-                   + " | file: " + description.fileOrIdentifier
-                   + " | " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize));
-
-    auto loadOutcome = PluginScanGuard::createPluginInstance(formatManager,
-                                                             description,
-                                                             sampleRate,
-                                                             blockSize);
-
-    if (loadOutcome.crashed)
-    {
-        HostDebug::log("Load CRASHED: " + description.name + " — " + loadOutcome.error);
-        return false;
-    }
-
-    auto created = std::move(loadOutcome.instance);
-
-    if (created == nullptr)
-    {
-        HostDebug::log("Load FAILED: " + description.name + " — " + loadOutcome.error);
-        return false;
-    }
-
-    if (pluginInstance != nullptr)
-        pluginInstance->releaseResources();
-
-    pluginInstance = std::move(created);
-
-    pluginInstance->setPlayConfigDetails(currentInputChannels, currentOutputChannels, sampleRate, blockSize);
-    pluginInstance->prepareToPlay(sampleRate, blockSize);
-
-    currentSampleRate = sampleRate;
-    currentBlockSize = blockSize;
-    updateProcessingChannelCount();
-
-    HostDebug::log("Load OK: " + pluginInstance->getName()
-                   + " | in=" + juce::String(pluginInstance->getTotalNumInputChannels())
-                   + " out=" + juce::String(pluginInstance->getTotalNumOutputChannels())
-                   + " | process channels=" + juce::String(processingChannelCount.load()));
-
-    return true;
+    // Legacy "load one plugin" == replace the chain with a single plugin.
+    // Sample rate / block size already come from prepare(); params kept for call-site compat.
+    clearChain();
+    return chain.addPlugin(description);
 }
 
 void PluginHost::unloadPlugin()
 {
-    juce::ScopedLock lock(pluginLock);
-
-    if (pluginInstance != nullptr)
-        HostDebug::log("Unloading plugin: " + pluginInstance->getName());
-
-    editorWindow.reset();
-
-    if (pluginInstance != nullptr)
-    {
-        pluginInstance->releaseResources();
-        pluginInstance.reset();
-    }
-
-    processingChannelCount.store(0);
+    clearChain();
 }
 
-bool PluginHost::hasLoadedPlugin() const
-{
-    juce::ScopedLock lock(pluginLock);
-    return pluginInstance != nullptr;
-}
-
+// ── Audio ────────────────────────────────────────────────────────────────────
 void PluginHost::prepare(double sampleRate, int blockSize, int inputChannels, int outputChannels)
 {
-    juce::ScopedLock lock(pluginLock);
-
-    currentSampleRate = sampleRate;
-    currentBlockSize = blockSize;
-    currentInputChannels = juce::jmax(1, inputChannels);
-    currentOutputChannels = juce::jmax(1, outputChannels);
-
-    HostDebug::log("Plugin prepare: " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize)
-                   + ", in=" + juce::String(currentInputChannels) + ", out=" + juce::String(currentOutputChannels));
-
-    if (pluginInstance != nullptr)
-    {
-        pluginInstance->releaseResources();
-        pluginInstance->setPlayConfigDetails(currentInputChannels, currentOutputChannels, sampleRate, blockSize);
-        pluginInstance->prepareToPlay(sampleRate, blockSize);
-        updateProcessingChannelCount();
-        HostDebug::log("  prepared: " + pluginInstance->getName());
-    }
+    chain.prepare(sampleRate, blockSize, inputChannels, outputChannels);
 }
 
 void PluginHost::processAudio(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    juce::ScopedLock lock(pluginLock);
-
-    if (pluginInstance == nullptr)
-        return;
-
-    pluginInstance->processBlock(buffer, midiMessages);
-}
-
-void PluginHost::openEditorWindow()
-{
-    juce::ScopedLock lock(pluginLock);
-
-    if (pluginInstance == nullptr)
-    {
-        HostDebug::log("Open editor skipped: no plugin loaded");
-        return;
-    }
-
-    editorWindow = std::make_unique<PluginEditorWindow>(*pluginInstance);
+    chain.processAudio(buffer, midiMessages);
 }

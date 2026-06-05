@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "HostDebug.h"
+#include "Preset.h"
 
 MainComponent::MainComponent()
     : audioEngine(pluginHost),
@@ -9,22 +10,29 @@ MainComponent::MainComponent()
 
     setSize(960, 620);
 
-    titleLabel.setText("Minimal JUCE VST3 Host", juce::dontSendNotification);
+    titleLabel.setText("ToneForge - VST3 Pedalboard", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
     addAndMakeVisible(titleLabel);
 
-    pluginListBox.setModel(this);
-    addAndMakeVisible(pluginListBox);
+    paletteLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+    chainLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
+    addAndMakeVisible(paletteLabel);
+    addAndMakeVisible(chainLabel);
 
-    audioSettingsButton.addListener(this);
-    scanButton.addListener(this);
-    loadButton.addListener(this);
-    openEditorButton.addListener(this);
+    paletteListBox.setModel(&paletteModel);
+    chainListBox.setModel(&chainModel);
+    addAndMakeVisible(paletteListBox);
+    addAndMakeVisible(chainListBox);
 
-    addAndMakeVisible(audioSettingsButton);
-    addAndMakeVisible(scanButton);
-    addAndMakeVisible(loadButton);
-    addAndMakeVisible(openEditorButton);
+    chainModel.onDoubleClick = [this](int row) { pluginHost.openEditorWindow(row); };
+
+    for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
+                     &upButton, &downButton, &bypassButton, &editorButton,
+                     &savePresetButton, &loadPresetButton })
+    {
+        b->addListener(this);
+        addAndMakeVisible(*b);
+    }
 
     audioEngine.start();
     tryRestoreAudioDeviceState();
@@ -34,8 +42,8 @@ MainComponent::MainComponent()
     juce::MessageManager::callAsync([this]
     {
         pluginScanner.scanDefaultWindowsVST3Folders();
-        refreshPluginList();
-        tryRestoreLastLoadedPlugin();
+        refreshPaletteList();
+        tryRestoreLastPreset();
     });
 }
 
@@ -43,13 +51,13 @@ MainComponent::~MainComponent()
 {
     HostDebug::log("MainComponent destroying");
 
-    audioSettingsButton.removeListener(this);
-    scanButton.removeListener(this);
-    loadButton.removeListener(this);
-    openEditorButton.removeListener(this);
+    for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
+                     &upButton, &downButton, &bypassButton, &editorButton,
+                     &savePresetButton, &loadPresetButton })
+        b->removeListener(this);
 
     audioSettingsWindow.reset();
-    pluginHost.unloadPlugin();
+    pluginHost.clearChain();
     saveAudioDeviceState();
     audioEngine.stop();
     appProperties.saveIfNeeded();
@@ -62,105 +70,283 @@ void MainComponent::resized()
     titleLabel.setBounds(area.removeFromTop(36));
     area.removeFromTop(8);
 
-    auto buttonRow = area.removeFromTop(36);
-    audioSettingsButton.setBounds(buttonRow.removeFromLeft(160));
-    buttonRow.removeFromLeft(8);
-    scanButton.setBounds(buttonRow.removeFromLeft(190));
-    buttonRow.removeFromLeft(8);
-    loadButton.setBounds(buttonRow.removeFromLeft(200));
-    buttonRow.removeFromLeft(8);
-    openEditorButton.setBounds(buttonRow.removeFromLeft(200));
+    auto topRow = area.removeFromTop(36);
+    audioSettingsButton.setBounds(topRow.removeFromLeft(140));
+    topRow.removeFromLeft(8);
+    scanButton.setBounds(topRow.removeFromLeft(160));
+    topRow.removeFromLeft(8);
+    addButton.setBounds(topRow.removeFromLeft(140));
+    topRow.removeFromLeft(8);
+    savePresetButton.setBounds(topRow.removeFromLeft(120));
+    topRow.removeFromLeft(8);
+    loadPresetButton.setBounds(topRow.removeFromLeft(120));
 
-    area.removeFromTop(8);
-    pluginListBox.setBounds(area);
-}
+    area.removeFromTop(10);
 
-int MainComponent::getNumRows()
-{
-    return pluginNames.size();
-}
-
-void MainComponent::paintListBoxItem(int rowNumber,
-                                     juce::Graphics& g,
-                                     int width,
-                                     int height,
-                                     bool rowIsSelected)
-{
-    if (rowIsSelected)
-        g.fillAll(juce::Colours::lightblue.withAlpha(0.5f));
-
-    if (juce::isPositiveAndBelow(rowNumber, pluginNames.size()))
+    // Chain action buttons live in a row at the bottom.
+    auto bottomRow = area.removeFromBottom(36);
+    for (auto* b : { &editorButton, &bypassButton, &removeButton, &downButton, &upButton })
     {
-        g.setColour(juce::Colours::white);
-        g.drawText(pluginNames[rowNumber], 6, 0, width - 12, height, juce::Justification::centredLeft);
+        b->setBounds(bottomRow.removeFromRight(120));
+        bottomRow.removeFromRight(8);
     }
+
+    area.removeFromBottom(8);
+
+    // Two columns: palette (left) and chain (right).
+    auto labelRow = area.removeFromTop(22);
+    paletteLabel.setBounds(labelRow.removeFromLeft(area.getWidth() / 2));
+    chainLabel.setBounds(labelRow);
+
+    auto columns = area;
+    auto left = columns.removeFromLeft(columns.getWidth() / 2);
+    left.removeFromRight(6);
+    columns.removeFromLeft(6);
+
+    paletteListBox.setBounds(left);
+    chainListBox.setBounds(columns);
 }
 
 void MainComponent::buttonClicked(juce::Button* button)
 {
-    if (button == &audioSettingsButton)
-    {
-        openAudioSettings();
-        return;
-    }
+    if (button == &audioSettingsButton) { openAudioSettings(); return; }
 
     if (button == &scanButton)
     {
         HostDebug::log("UI: Scan VST3 clicked");
         pluginScanner.scanDefaultWindowsVST3Folders();
-        refreshPluginList();
+        refreshPaletteList();
         return;
     }
 
-    if (button == &loadButton)
+    if (button == &addButton)    { addSelectedToChain();      return; }
+    if (button == &removeButton) { removeSelectedChainSlot(); return; }
+    if (button == &upButton)     { moveSelectedChainSlot(-1); return; }
+    if (button == &downButton)   { moveSelectedChainSlot(+1); return; }
+    if (button == &bypassButton) { toggleSelectedBypass();    return; }
+    if (button == &editorButton) { openSelectedEditor();      return; }
+    if (button == &savePresetButton) { savePreset();          return; }
+    if (button == &loadPresetButton) { loadPreset();          return; }
+}
+
+void MainComponent::refreshPaletteList()
+{
+    paletteNames.clear();
+
+    for (const auto& type : pluginScanner.getKnownPluginList().getTypes())
+        paletteNames.add(type.name + " [" + type.pluginFormatName + "]");
+
+    HostDebug::log("Palette refreshed: " + juce::String(paletteNames.size()) + " plugin(s)");
+
+    paletteListBox.updateContent();
+    paletteListBox.repaint();
+}
+
+void MainComponent::refreshChainList()
+{
+    chainNames.clear();
+
+    const auto infos = pluginHost.getSlotInfos();
+
+    for (int i = 0; i < infos.size(); ++i)
     {
-        auto selected = pluginListBox.getSelectedRow();
+        const auto& info = infos.getReference(i);
+        juce::String label;
+        label << (i + 1) << ". " << info.name << " [" << info.format << "]";
 
-        if (!juce::isPositiveAndBelow(selected, pluginScanner.getKnownPluginList().getNumTypes()))
-        {
-            HostDebug::log("UI: Load clicked — no valid selection (row " + juce::String(selected) + ")");
-            return;
-        }
+        if (info.bypassed)
+            label << "   (BYPASSED)";
 
-        auto* device = audioEngine.getDeviceManager().getCurrentAudioDevice();
+        chainNames.add(label);
+    }
 
-        if (device == nullptr)
-        {
-            HostDebug::log("UI: Load clicked — no audio device");
-            return;
-        }
+    chainListBox.updateContent();
+    chainListBox.repaint();
+}
 
-        auto description = pluginScanner.getKnownPluginList().getTypes()[selected];
-        HostDebug::log("UI: Load clicked — " + description.name);
+int MainComponent::getSelectedPaletteRow() const
+{
+    return paletteListBox.getSelectedRow();
+}
 
-        if (pluginHost.loadPlugin(description,
-                                  device->getCurrentSampleRate(),
-                                  device->getCurrentBufferSizeSamples()))
-        {
-            saveLastLoadedPlugin(description);
-        }
+int MainComponent::getSelectedChainRow() const
+{
+    return chainListBox.getSelectedRow();
+}
 
+void MainComponent::addSelectedToChain()
+{
+    const auto row = getSelectedPaletteRow();
+    const auto& types = pluginScanner.getKnownPluginList().getTypes();
+
+    if (! juce::isPositiveAndBelow(row, types.size()))
+    {
+        HostDebug::log("UI: Add clicked — no palette selection");
         return;
     }
 
-    if (button == &openEditorButton)
+    const auto description = types[row];
+    HostDebug::log("UI: Add to chain — " + description.name);
+
+    if (pluginHost.addPlugin(description))
     {
-        HostDebug::log("UI: Open editor clicked");
-        pluginHost.openEditorWindow();
+        refreshChainList();
+        chainListBox.selectRow(pluginHost.getNumSlots() - 1);
     }
 }
 
-void MainComponent::refreshPluginList()
+void MainComponent::moveSelectedChainSlot(int delta)
 {
-    pluginNames.clear();
+    const auto row = getSelectedChainRow();
+    const auto target = row + delta;
 
-    for (const auto& type : pluginScanner.getKnownPluginList().getTypes())
-        pluginNames.add(type.name + " [" + type.pluginFormatName + "]");
+    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots())
+        || ! juce::isPositiveAndBelow(target, pluginHost.getNumSlots()))
+        return;
 
-    HostDebug::log("Plugin list refreshed: " + juce::String(pluginNames.size()) + " row(s)");
+    pluginHost.movePlugin(row, target);
+    refreshChainList();
+    chainListBox.selectRow(target);
+}
 
-    pluginListBox.updateContent();
-    pluginListBox.repaint();
+void MainComponent::toggleSelectedBypass()
+{
+    const auto row = getSelectedChainRow();
+
+    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+        return;
+
+    const auto infos = pluginHost.getSlotInfos();
+    pluginHost.setBypass(row, ! infos.getReference(row).bypassed);
+    refreshChainList();
+    chainListBox.selectRow(row);
+}
+
+void MainComponent::removeSelectedChainSlot()
+{
+    const auto row = getSelectedChainRow();
+
+    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+        return;
+
+    HostDebug::log("UI: Remove chain slot " + juce::String(row));
+    pluginHost.removePlugin(row);
+    refreshChainList();
+}
+
+void MainComponent::openSelectedEditor()
+{
+    const auto row = getSelectedChainRow();
+
+    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+    {
+        HostDebug::log("UI: Open editor — no chain selection");
+        return;
+    }
+
+    pluginHost.openEditorWindow(row);
+}
+
+void MainComponent::savePreset()
+{
+    if (pluginHost.getNumSlots() == 0)
+    {
+        HostDebug::log("UI: Save preset — chain is empty");
+        return;
+    }
+
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Save Preset",
+        Preset::getPresetsDirectory(),
+        juce::String("*") + Preset::fileExtension);
+
+    const auto chooserFlags = juce::FileBrowserComponent::saveMode
+                     | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& fc)
+    {
+        auto file = fc.getResult();
+
+        if (file == juce::File())
+            return;
+
+        file = file.withFileExtension(Preset::fileExtension);
+
+        const auto specs = pluginHost.captureChain();
+
+        if (Preset::saveToFile(specs, file.getFileNameWithoutExtension(), file))
+            saveLastPresetPath(file);
+    });
+}
+
+void MainComponent::loadPreset()
+{
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Load Preset",
+        Preset::getPresetsDirectory(),
+        juce::String("*") + Preset::fileExtension);
+
+    const auto chooserFlags = juce::FileBrowserComponent::openMode
+                     | juce::FileBrowserComponent::canSelectFiles;
+
+    fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+
+        if (file == juce::File())
+            return;
+
+        loadPresetFile(file);
+    });
+}
+
+void MainComponent::loadPresetFile(const juce::File& file)
+{
+    juce::Array<PluginChain::SlotSpec> specs;
+
+    if (! Preset::loadFromFile(file, specs))
+        return;
+
+    pluginHost.rebuildChain(specs);
+    refreshChainList();
+    saveLastPresetPath(file);
+    HostDebug::log("Preset applied: " + file.getFileName());
+}
+
+void MainComponent::saveLastPresetPath(const juce::File& file)
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        settings->setValue(lastPresetPathKey, file.getFullPathName());
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::tryRestoreLastPreset()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    const auto path = settings->getValue(lastPresetPathKey);
+
+    if (path.isEmpty())
+    {
+        HostDebug::log("Restore preset: none saved");
+        return;
+    }
+
+    const juce::File file(path);
+
+    if (! file.existsAsFile())
+    {
+        HostDebug::log("Restore preset: file missing — " + path);
+        return;
+    }
+
+    HostDebug::log("Restore preset: loading " + path);
+    loadPresetFile(file);
 }
 
 void MainComponent::initialiseSettings()
@@ -172,69 +358,6 @@ void MainComponent::initialiseSettings()
     options.storageFormat = juce::PropertiesFile::storeAsXML;
 
     appProperties.setStorageParameters(options);
-}
-
-void MainComponent::tryRestoreLastLoadedPlugin()
-{
-    auto* settings = appProperties.getUserSettings();
-
-    if (settings == nullptr)
-        return;
-
-    auto lastPluginIdentifier = settings->getValue(lastPluginIdentifierKey);
-
-    if (lastPluginIdentifier.isEmpty())
-    {
-        HostDebug::log("Restore plugin: none saved");
-        return;
-    }
-
-    HostDebug::log("Restore plugin: looking for " + lastPluginIdentifier);
-
-    auto* device = audioEngine.getDeviceManager().getCurrentAudioDevice();
-
-    if (device == nullptr)
-    {
-        HostDebug::log("Restore plugin: aborted — no audio device");
-        return;
-    }
-
-    const auto& types = pluginScanner.getKnownPluginList().getTypes();
-
-    for (int i = 0; i < types.size(); ++i)
-    {
-        const auto& type = types.getReference(i);
-
-        if (type.fileOrIdentifier != lastPluginIdentifier)
-            continue;
-
-        if (pluginHost.loadPlugin(type,
-                                  device->getCurrentSampleRate(),
-                                  device->getCurrentBufferSizeSamples()))
-        {
-            pluginListBox.selectRow(i);
-            HostDebug::log("Restore plugin: OK — " + type.name);
-        }
-        else
-        {
-            HostDebug::log("Restore plugin: FAILED — " + type.name);
-        }
-
-        return;
-    }
-
-    HostDebug::log("Restore plugin: identifier not found in scanned list");
-}
-
-void MainComponent::saveLastLoadedPlugin(const juce::PluginDescription& description)
-{
-    auto* settings = appProperties.getUserSettings();
-
-    if (settings == nullptr)
-        return;
-
-    settings->setValue(lastPluginIdentifierKey, description.fileOrIdentifier);
-    settings->saveIfNeeded();
 }
 
 void MainComponent::openAudioSettings()

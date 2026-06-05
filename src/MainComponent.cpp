@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "HostDebug.h"
+#include "Preset.h"
 
 MainComponent::MainComponent()
     : audioEngine(pluginHost),
@@ -26,7 +27,8 @@ MainComponent::MainComponent()
     chainModel.onDoubleClick = [this](int row) { pluginHost.openEditorWindow(row); };
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
-                     &upButton, &downButton, &bypassButton, &editorButton })
+                     &upButton, &downButton, &bypassButton, &editorButton,
+                     &savePresetButton, &loadPresetButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -41,6 +43,7 @@ MainComponent::MainComponent()
     {
         pluginScanner.scanDefaultWindowsVST3Folders();
         refreshPaletteList();
+        tryRestoreLastPreset();
     });
 }
 
@@ -49,7 +52,8 @@ MainComponent::~MainComponent()
     HostDebug::log("MainComponent destroying");
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
-                     &upButton, &downButton, &bypassButton, &editorButton })
+                     &upButton, &downButton, &bypassButton, &editorButton,
+                     &savePresetButton, &loadPresetButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
@@ -67,11 +71,15 @@ void MainComponent::resized()
     area.removeFromTop(8);
 
     auto topRow = area.removeFromTop(36);
-    audioSettingsButton.setBounds(topRow.removeFromLeft(150));
+    audioSettingsButton.setBounds(topRow.removeFromLeft(140));
     topRow.removeFromLeft(8);
-    scanButton.setBounds(topRow.removeFromLeft(170));
+    scanButton.setBounds(topRow.removeFromLeft(160));
     topRow.removeFromLeft(8);
-    addButton.setBounds(topRow.removeFromLeft(150));
+    addButton.setBounds(topRow.removeFromLeft(140));
+    topRow.removeFromLeft(8);
+    savePresetButton.setBounds(topRow.removeFromLeft(120));
+    topRow.removeFromLeft(8);
+    loadPresetButton.setBounds(topRow.removeFromLeft(120));
 
     area.removeFromTop(10);
 
@@ -117,6 +125,8 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &downButton)   { moveSelectedChainSlot(+1); return; }
     if (button == &bypassButton) { toggleSelectedBypass();    return; }
     if (button == &editorButton) { openSelectedEditor();      return; }
+    if (button == &savePresetButton) { savePreset();          return; }
+    if (button == &loadPresetButton) { loadPreset();          return; }
 }
 
 void MainComponent::refreshPaletteList()
@@ -235,6 +245,108 @@ void MainComponent::openSelectedEditor()
     }
 
     pluginHost.openEditorWindow(row);
+}
+
+void MainComponent::savePreset()
+{
+    if (pluginHost.getNumSlots() == 0)
+    {
+        HostDebug::log("UI: Save preset — chain is empty");
+        return;
+    }
+
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Save Preset",
+        Preset::getPresetsDirectory(),
+        juce::String("*") + Preset::fileExtension);
+
+    const auto chooserFlags = juce::FileBrowserComponent::saveMode
+                     | juce::FileBrowserComponent::warnAboutOverwriting;
+
+    fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& fc)
+    {
+        auto file = fc.getResult();
+
+        if (file == juce::File())
+            return;
+
+        file = file.withFileExtension(Preset::fileExtension);
+
+        const auto specs = pluginHost.captureChain();
+
+        if (Preset::saveToFile(specs, file.getFileNameWithoutExtension(), file))
+            saveLastPresetPath(file);
+    });
+}
+
+void MainComponent::loadPreset()
+{
+    fileChooser = std::make_unique<juce::FileChooser>(
+        "Load Preset",
+        Preset::getPresetsDirectory(),
+        juce::String("*") + Preset::fileExtension);
+
+    const auto chooserFlags = juce::FileBrowserComponent::openMode
+                     | juce::FileBrowserComponent::canSelectFiles;
+
+    fileChooser->launchAsync(chooserFlags, [this](const juce::FileChooser& fc)
+    {
+        const auto file = fc.getResult();
+
+        if (file == juce::File())
+            return;
+
+        loadPresetFile(file);
+    });
+}
+
+void MainComponent::loadPresetFile(const juce::File& file)
+{
+    juce::Array<PluginChain::SlotSpec> specs;
+
+    if (! Preset::loadFromFile(file, specs))
+        return;
+
+    pluginHost.rebuildChain(specs);
+    refreshChainList();
+    saveLastPresetPath(file);
+    HostDebug::log("Preset applied: " + file.getFileName());
+}
+
+void MainComponent::saveLastPresetPath(const juce::File& file)
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        settings->setValue(lastPresetPathKey, file.getFullPathName());
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::tryRestoreLastPreset()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    const auto path = settings->getValue(lastPresetPathKey);
+
+    if (path.isEmpty())
+    {
+        HostDebug::log("Restore preset: none saved");
+        return;
+    }
+
+    const juce::File file(path);
+
+    if (! file.existsAsFile())
+    {
+        HostDebug::log("Restore preset: file missing — " + path);
+        return;
+    }
+
+    HostDebug::log("Restore preset: loading " + path);
+    loadPresetFile(file);
 }
 
 void MainComponent::initialiseSettings()

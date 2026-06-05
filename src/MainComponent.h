@@ -99,6 +99,12 @@ private:
     void removeSelectedChainSlot();
     void openSelectedEditor();
 
+    void savePreset();
+    void loadPreset();
+    void loadPresetFile(const juce::File& file);
+    void saveLastPresetPath(const juce::File& file);
+    void tryRestoreLastPreset();
+
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
     AudioEngine audioEngine;
@@ -117,6 +123,8 @@ private:
     juce::TextButton downButton          { "Move Down" };
     juce::TextButton bypassButton        { "Bypass" };
     juce::TextButton editorButton        { "Open Editor" };
+    juce::TextButton savePresetButton    { "Save Preset" };
+    juce::TextButton loadPresetButton    { "Load Preset" };
 
     juce::StringArray paletteNames;
     juce::StringArray chainNames;
@@ -126,10 +134,12 @@ private:
     juce::ListBox chainListBox;
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
+    std::unique_ptr<juce::FileChooser> fileChooser;
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
     static constexpr const char* audioDeviceStateKey = "audioDeviceState";
+    static constexpr const char* lastPresetPathKey   = "lastPresetPath";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

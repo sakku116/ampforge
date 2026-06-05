@@ -6,8 +6,7 @@
 #include "PluginScanner.h"
 
 class MainComponent : public juce::Component,
-                      private juce::Button::Listener,
-                      private juce::ListBoxModel
+                      private juce::Button::Listener
 {
 public:
     MainComponent();
@@ -31,15 +30,7 @@ private:
             setResizable(true, false);
 
             auto* selector = new juce::AudioDeviceSelectorComponent(
-                manager,
-                /*minAudioInputChannels*/  0,
-                /*maxAudioInputChannels*/  2,
-                /*minAudioOutputChannels*/ 0,
-                /*maxAudioOutputChannels*/ 2,
-                /*showMidiInputOptions*/   false,
-                /*showMidiOutputSelector*/ false,
-                /*showChannelsAsStereoPairs*/ true,
-                /*hideAdvancedOptionsWithButton*/ false);
+                manager, 0, 2, 0, 2, false, false, true, false);
 
             selector->setSize(500, 400);
             setContentOwned(selector, true);
@@ -58,24 +49,55 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsWindow)
     };
 
+    // ── Generic text list model (used for both palette and chain) ─────────────
+    class SimpleListModel : public juce::ListBoxModel
+    {
+    public:
+        explicit SimpleListModel(juce::StringArray& source) : rows(source) {}
+
+        int getNumRows() override { return rows.size(); }
+
+        void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected) override
+        {
+            if (selected)
+                g.fillAll(juce::Colours::lightblue.withAlpha(0.5f));
+
+            if (juce::isPositiveAndBelow(row, rows.size()))
+            {
+                g.setColour(juce::Colours::white);
+                g.drawText(rows[row], 6, 0, width - 12, height, juce::Justification::centredLeft);
+            }
+        }
+
+        void listBoxItemDoubleClicked(int row, const juce::MouseEvent&) override
+        {
+            if (onDoubleClick)
+                onDoubleClick(row);
+        }
+
+        std::function<void(int)> onDoubleClick;
+
+    private:
+        juce::StringArray& rows;
+    };
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     void initialiseSettings();
-    void tryRestoreLastLoadedPlugin();
-    void saveLastLoadedPlugin(const juce::PluginDescription& description);
     void openAudioSettings();
     void saveAudioDeviceState();
     void tryRestoreAudioDeviceState();
 
-    int getNumRows() override;
-    void paintListBoxItem(int rowNumber,
-                          juce::Graphics& g,
-                          int width,
-                          int height,
-                          bool rowIsSelected) override;
-
     void buttonClicked(juce::Button* button) override;
 
-    void refreshPluginList();
+    void refreshPaletteList();
+    void refreshChainList();
+    int  getSelectedPaletteRow() const;
+    int  getSelectedChainRow() const;
+    void addSelectedToChain();
+    void moveSelectedChainSlot(int delta);
+    void toggleSelectedBypass();
+    void removeSelectedChainSlot();
+    void openSelectedEditor();
 
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
@@ -84,21 +106,30 @@ private:
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
+    juce::Label paletteLabel { {}, "Scanned Plugins" };
+    juce::Label chainLabel   { {}, "Pedalboard Chain" };
+
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::TextButton scanButton          { "Scan VST3 Folders" };
-    juce::TextButton loadButton          { "Load Selected Plugin" };
-    juce::TextButton openEditorButton    { "Open Plugin Editor" };
+    juce::TextButton addButton           { "Add to Chain >" };
+    juce::TextButton removeButton        { "Remove" };
+    juce::TextButton upButton            { "Move Up" };
+    juce::TextButton downButton          { "Move Down" };
+    juce::TextButton bypassButton        { "Bypass" };
+    juce::TextButton editorButton        { "Open Editor" };
 
-    juce::ListBox pluginListBox;
-    juce::StringArray pluginNames;
+    juce::StringArray paletteNames;
+    juce::StringArray chainNames;
+    SimpleListModel paletteModel { paletteNames };
+    SimpleListModel chainModel   { chainNames };
+    juce::ListBox paletteListBox;
+    juce::ListBox chainListBox;
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
-
-    static constexpr const char* lastPluginIdentifierKey = "lastPluginIdentifier";
-    static constexpr const char* audioDeviceStateKey     = "audioDeviceState";
+    static constexpr const char* audioDeviceStateKey = "audioDeviceState";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

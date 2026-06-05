@@ -22,8 +22,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 ## State
 - Current branch: `feat/phase-2-pedalboard`
 - Last good commit: (lihat `git log --oneline -1`)
-- Next task: 2.4 (Preset model)
-- Build status: GREEN (pedalboard UI OK)
+- Next task: 2.5 (Save/Load preset UI)
+- Build status: GREEN (Preset module compiles)
 
 ## Konvensi
 - Branch per phase: `feat/phase-2-pedalboard`, `feat/phase-3-performance`, `feat/phase-4-live-control`. Merge ke `main` saat phase selesai & build hijau.
@@ -37,8 +37,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 - [x] 2.1 `PluginChain` class (src/PluginChain.h/.cpp) + daftarkan ke CMake
 - [x] 2.2 Refactor `PluginHost` → bungkus `PluginChain` (AudioEngine API tetap)
 - [x] 2.3 UI pedalboard (palette + chain rows: bypass/up/down/remove/editor)
-- [~] 2.4 Preset model (serialize chain + state plugin → ValueTree/XML)
-- [ ] 2.5 UI Save/Load preset + last-preset persistence
+- [x] 2.4 Preset model (serialize chain + state plugin → ValueTree/XML)
+- [~] 2.5 UI Save/Load preset + last-preset persistence
 - [ ] 2.6 Build hijau + merge ke main
 
 ## Phase 3 — Performance  (branch `feat/phase-3-performance`)

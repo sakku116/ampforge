@@ -3,18 +3,20 @@
 #include <JuceHeader.h>
 #include <atomic>
 #include <memory>
+#include <vector>
 
 /** An ordered chain of plugin instances:
         Input -> slot0 -> slot1 -> ... -> Output
 
-    Thread-safety: structural edits (add/remove/move/bypass/rebuild) take a lock that
-    the audio thread also acquires in processAudio. Plugin instances are *created*
-    outside the lock (slow, disk I/O) and only swapped in under the lock, to keep the
-    critical section short. Phase 3 will replace this with lock-free chain swapping. */
+    Realtime model (Phase 3): the audio thread reads the active slot list through an
+    atomic shared_ptr and never takes a long lock. Structural edits build a *new*
+    immutable list on the message thread (sharing the existing Slot objects) and publish
+    it atomically. Removed slots are reclaimed on the message thread once the audio thread
+    has dropped its reference, so plugin instances are never destroyed on the audio thread.
+    Bypass is a per-slot atomic flag, so toggling it needs no republish. */
 class PluginChain
 {
 public:
-    /** Lightweight view of a slot for the UI. */
     struct SlotInfo
     {
         juce::String name;
@@ -22,11 +24,10 @@ public:
         bool bypassed = false;
     };
 
-    /** Full description of a slot used to save/rebuild a chain (presets, scenes). */
     struct SlotSpec
     {
         juce::PluginDescription description;
-        juce::MemoryBlock state;   // payload from AudioPluginInstance::getStateInformation (may be empty)
+        juce::MemoryBlock state;   // AudioPluginInstance::getStateInformation payload (may be empty)
         bool bypassed = false;
     };
 
@@ -34,26 +35,18 @@ public:
     ~PluginChain();
 
     // ── Structural edits (message thread) ────────────────────────────────────
-    /** Creates an instance for the description and appends it to the chain. */
     bool addPlugin(const juce::PluginDescription& description);
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex);
     void setBypass(int index, bool shouldBypass);
     void clear();
-
-    /** Replaces the whole chain from preset/scene specs. Instances are built first,
-        then swapped in atomically under the lock. Returns false if any slot failed. */
     bool rebuildFrom(const juce::Array<SlotSpec>& specs);
 
     // ── Queries (message thread) ─────────────────────────────────────────────
     int getNumSlots() const;
     juce::Array<SlotInfo> getSlotInfos() const;
     bool isBypassed(int index) const;
-
-    /** Snapshot of the chain (captures live plugin state) — for saving presets. */
     juce::Array<SlotSpec> captureSpecs() const;
-
-    /** Instance pointer for opening an editor. nullptr if out of range. */
     juce::AudioPluginInstance* getInstance(int index) const;
 
     juce::AudioPluginFormatManager& getFormatManager() { return formatManager; }
@@ -71,14 +64,21 @@ private:
         juce::PluginDescription description;
     };
 
-    /** Builds a prepared instance for a description (outside the lock). nullptr on failure. */
-    std::unique_ptr<Slot> createSlot(const juce::PluginDescription& description, juce::String& error);
+    using SlotList = std::vector<std::shared_ptr<Slot>>;
+
+    std::shared_ptr<Slot> createSlot(const juce::PluginDescription& description, juce::String& error);
     void prepareSlot(Slot& slot);
-    void updateProcessingChannelCount();   // call under lock
+
+    std::shared_ptr<SlotList> currentList() const { return activeList.load(); }
+    void publish(std::shared_ptr<SlotList> next);   // call under editLock
+    void reclaimRetired();                          // call under editLock
+    static int computeChannelCount(const SlotList& list);
 
     juce::AudioPluginFormatManager& formatManager;
-    juce::OwnedArray<Slot> slots;
-    mutable juce::CriticalSection lock;
+
+    std::atomic<std::shared_ptr<SlotList>> activeList { std::make_shared<SlotList>() };
+    std::vector<std::shared_ptr<SlotList>> retired;   // message-thread graveyard for old lists
+    juce::CriticalSection editLock;                   // serialises message-thread edits ONLY
 
     double currentSampleRate    = 44100.0;
     int    currentBlockSize     = 512;

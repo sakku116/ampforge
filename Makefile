@@ -5,6 +5,7 @@
 
 BUILD_DIR := build
 CONFIG ?= Debug
+CMAKE ?= $(shell if command -v cmake >/dev/null 2>&1; then command -v cmake; elif [ -x "/c/Program Files/CMake/bin/cmake.exe" ]; then printf '%s\n' "/c/Program Files/CMake/bin/cmake.exe"; else printf '%s\n' cmake; fi)
 EXE_PATH := $(BUILD_DIR)/GtrFxSim_artefacts/$(CONFIG)/Guitar VST3 Host.exe
 WORKER_EXE := $(BUILD_DIR)/GtrFxSim_artefacts/$(CONFIG)/GuitarVST3ScanWorker.exe
 LOG_FILE := ~/AppData/Roaming/GtrFxSim/host.log
@@ -27,8 +28,8 @@ help:
 
 build:
 	@echo "[*] Building $(CONFIG)..."
-	@test -d $(BUILD_DIR) || cmake -B $(BUILD_DIR)
-	@cmake --build $(BUILD_DIR) --config $(CONFIG)
+	@test -f $(BUILD_DIR)/CMakeCache.txt || "$(CMAKE)" -S . -B $(BUILD_DIR)
+	@"$(CMAKE)" --build $(BUILD_DIR) --config $(CONFIG)
 	@echo "[+] Build complete: $(EXE_PATH)"
 
 release:

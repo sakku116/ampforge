@@ -9,6 +9,7 @@ MainComponent::MainComponent()
     initialiseSettings();
 
     setSize(960, 620);
+    setWantsKeyboardFocus(true);   // receive key presses for keyboard/footswitch mapping
 
     titleLabel.setText("ToneForge - VST3 Pedalboard", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
@@ -34,14 +35,33 @@ MainComponent::MainComponent()
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
                      &upButton, &downButton, &bypassButton, &editorButton,
-                     &savePresetButton, &loadPresetButton })
+                     &savePresetButton, &loadPresetButton,
+                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
+                     &prevSceneButton, &nextSceneButton,
+                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
+                     &learnScenePrevButton, &clearMapsButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
     }
 
+    sceneSelector.setTextWhenNothingSelected("(no scenes)");
+    sceneSelector.onChange = [this]
+    {
+        const int idx = sceneSelector.getSelectedId() - 1;   // ids are index+1
+        if (idx >= 0 && idx != sceneManager.getCurrentIndex())
+            recallScene(idx);
+    };
+    addAndMakeVisible(sceneSelector);
+
+    controlLabel.setFont(juce::FontOptions(13.0f));
+    controlLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+    addAndMakeVisible(controlLabel);
+
     audioEngine.start();
     tryRestoreAudioDeviceState();
+
+    audioEngine.onMidiForControl = [this](const juce::MidiMessage& m) { handleControlMidi(m); };
 
     startTimerHz(10);   // performance metrics refresh
 
@@ -52,6 +72,8 @@ MainComponent::MainComponent()
         pluginScanner.scanDefaultWindowsVST3Folders();
         refreshPaletteList();
         tryRestoreLastPreset();
+        restoreScenes();
+        restoreControlMap();
     });
 }
 
@@ -63,10 +85,16 @@ MainComponent::~MainComponent()
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
                      &upButton, &downButton, &bypassButton, &editorButton,
-                     &savePresetButton, &loadPresetButton })
+                     &savePresetButton, &loadPresetButton,
+                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
+                     &prevSceneButton, &nextSceneButton,
+                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
+                     &learnScenePrevButton, &clearMapsButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
+    saveScenes();
+    saveControlMap();
     pluginHost.clearChain();
     saveAudioDeviceState();
     audioEngine.stop();
@@ -93,7 +121,37 @@ void MainComponent::resized()
     topRow.removeFromLeft(8);
     loadPresetButton.setBounds(topRow.removeFromLeft(120));
 
+    area.removeFromTop(8);
+
+    auto sceneRow = area.removeFromTop(34);
+    sceneSelector.setBounds(sceneRow.removeFromLeft(220));
+    sceneRow.removeFromLeft(8);
+    captureSceneButton.setBounds(sceneRow.removeFromLeft(120));
+    sceneRow.removeFromLeft(6);
+    updateSceneButton.setBounds(sceneRow.removeFromLeft(110));
+    sceneRow.removeFromLeft(6);
+    deleteSceneButton.setBounds(sceneRow.removeFromLeft(110));
+    sceneRow.removeFromLeft(6);
+    prevSceneButton.setBounds(sceneRow.removeFromLeft(80));
+    sceneRow.removeFromLeft(6);
+    nextSceneButton.setBounds(sceneRow.removeFromLeft(80));
+
     area.removeFromTop(10);
+
+    // Live-control row (bottom-most).
+    auto controlRow = area.removeFromBottom(32);
+    learnBypassButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    learnExprButton.setBounds(controlRow.removeFromLeft(140));
+    controlRow.removeFromLeft(6);
+    learnSceneNextButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    learnScenePrevButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    clearMapsButton.setBounds(controlRow.removeFromLeft(100));
+    controlRow.removeFromLeft(10);
+    controlLabel.setBounds(controlRow);
+    area.removeFromBottom(8);
 
     // Chain action buttons live in a row at the bottom.
     auto bottomRow = area.removeFromBottom(36);
@@ -139,10 +197,305 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &editorButton) { openSelectedEditor();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
+    if (button == &captureSceneButton) { captureScene();      return; }
+    if (button == &updateSceneButton)  { updateScene();       return; }
+    if (button == &deleteSceneButton)  { deleteScene();       return; }
+    if (button == &prevSceneButton)    { stepScene(-1);       return; }
+    if (button == &nextSceneButton)    { stepScene(+1);       return; }
+
+    if (button == &learnBypassButton)
+    {
+        armActionLearn({ ControlAction::Type::toggleBypass, juce::jmax(0, getSelectedChainRow()) });
+        return;
+    }
+    if (button == &learnExprButton)    { armExpressionLearn(juce::jmax(0, getSelectedChainRow()), 0); return; }
+    if (button == &learnSceneNextButton) { armActionLearn({ ControlAction::Type::nextScene, 0 }); return; }
+    if (button == &learnScenePrevButton) { armActionLearn({ ControlAction::Type::prevScene, 0 }); return; }
+    if (button == &clearMapsButton)    { clearMappings();     return; }
+}
+
+void MainComponent::handleControlMidi(const juce::MidiMessage& message)
+{
+    if (expressionLearnArmed.load())
+    {
+        if (! message.isController())
+            return;   // wait for a CC (expression) message
+
+        const int cc = message.getControllerNumber();
+        const int chan = message.getChannel();
+        const int slot = pendingExprSlot;
+        const int param = pendingExprParam;
+        expressionLearnArmed.store(false);
+
+        juce::MessageManager::callAsync([this, chan, cc, slot, param]
+        {
+            controlMap.addExpression({ chan, cc, slot, param });
+            saveControlMap();
+            HostDebug::log("Expression learn: CC " + juce::String(cc)
+                           + " -> slot " + juce::String(slot + 1) + " param " + juce::String(param));
+        });
+        return;
+    }
+
+    if (midiLearnArmed.load())
+    {
+        if (message.isController() && message.getControllerValue() < 64)
+            return;   // wait for the footswitch/button "on", not the release
+
+        const auto trigger = ControlMap::triggerFromMidi(message);
+
+        if (! trigger.isValid())
+            return;   // ignore non-mappable messages while learning
+
+        const auto action = pendingLearnAction;
+        midiLearnArmed.store(false);
+
+        juce::MessageManager::callAsync([this, trigger, action]
+        {
+            controlMap.addBinding({ trigger, action });
+            saveControlMap();
+            HostDebug::log("MIDI learn: bound " + trigger.toString() + " -> " + action.toString());
+        });
+        return;
+    }
+
+    // Expression pedals: apply continuous CC -> parameter directly (high message rate).
+    for (const auto& target : controlMap.matchExpressions(message))
+        pluginHost.setParameter(target.slotIndex, target.paramIndex, target.value);
+
+    const auto action = controlMap.matchMidi(message);
+
+    if (! action.isValid())
+        return;
+
+    juce::MessageManager::callAsync([this, action] { executeAction(action); });
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    const int code = key.getKeyCode();
+
+    if (midiLearnArmed.load())
+    {
+        ControlTrigger trigger;
+        trigger.type = ControlTrigger::Type::key;
+        trigger.number = code;
+
+        const auto action = pendingLearnAction;
+        midiLearnArmed.store(false);
+        controlMap.addBinding({ trigger, action });
+        saveControlMap();
+        HostDebug::log("Key learn: bound " + trigger.toString() + " -> " + action.toString());
+        return true;
+    }
+
+    const auto action = controlMap.matchKey(code);
+
+    if (! action.isValid())
+        return false;   // let unhandled keys propagate
+
+    executeAction(action);   // already on the message thread
+    return true;
+}
+
+void MainComponent::executeAction(const ControlAction& action)
+{
+    switch (action.type)
+    {
+        case ControlAction::Type::toggleBypass:
+            if (juce::isPositiveAndBelow(action.index, pluginHost.getNumSlots()))
+            {
+                const auto infos = pluginHost.getSlotInfos();
+                pluginHost.setBypass(action.index, ! infos.getReference(action.index).bypassed);
+                refreshChainList();
+            }
+            break;
+
+        case ControlAction::Type::nextScene:  stepScene(+1);            break;
+        case ControlAction::Type::prevScene:  stepScene(-1);            break;
+        case ControlAction::Type::loadScene:  recallScene(action.index); break;
+
+        case ControlAction::Type::none:
+        default:
+            break;
+    }
+}
+
+void MainComponent::captureScene()
+{
+    const auto name = "Scene " + juce::String(sceneManager.getNumScenes() + 1);
+    const int idx = sceneManager.addScene(name, pluginHost.captureChain());
+    sceneManager.setCurrentIndex(idx);
+    refreshSceneSelector();
+    saveScenes();
+    HostDebug::log("Scene captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
+}
+
+void MainComponent::updateScene()
+{
+    const int idx = sceneManager.getCurrentIndex();
+
+    if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.replaceScene(idx, pluginHost.captureChain());
+    saveScenes();
+    HostDebug::log("Scene updated: index " + juce::String(idx));
+}
+
+void MainComponent::deleteScene()
+{
+    const int idx = sceneManager.getCurrentIndex();
+
+    if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.removeScene(idx);
+    refreshSceneSelector();
+    saveScenes();
+    HostDebug::log("Scene deleted: index " + juce::String(idx));
+}
+
+void MainComponent::recallScene(int index)
+{
+    if (! juce::isPositiveAndBelow(index, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.setCurrentIndex(index);
+    pluginHost.switchChainWithCrossfade(sceneManager.getScene(index).specs, 25);
+    refreshChainList();
+    refreshSceneSelector();
+    HostDebug::log("Scene recalled: index " + juce::String(index));
+}
+
+void MainComponent::stepScene(int delta)
+{
+    const int n = sceneManager.getNumScenes();
+
+    if (n == 0)
+        return;
+
+    int idx = sceneManager.getCurrentIndex();
+    idx = idx < 0 ? 0 : (idx + delta + n) % n;   // wrap around
+    recallScene(idx);
+}
+
+void MainComponent::refreshSceneSelector()
+{
+    sceneSelector.clear(juce::dontSendNotification);
+
+    const auto names = sceneManager.getSceneNames();
+
+    for (int i = 0; i < names.size(); ++i)
+        sceneSelector.addItem(names[i], i + 1);   // ids are index+1
+
+    const int cur = sceneManager.getCurrentIndex();
+
+    if (juce::isPositiveAndBelow(cur, names.size()))
+        sceneSelector.setSelectedId(cur + 1, juce::dontSendNotification);
+}
+
+void MainComponent::saveScenes()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        if (auto xml = sceneManager.toValueTree().createXml())
+            settings->setValue(scenesStateKey, xml.get());
+
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::restoreScenes()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    if (auto xml = settings->getXmlValue(scenesStateKey))
+    {
+        sceneManager.fromValueTree(juce::ValueTree::fromXml(*xml));
+        refreshSceneSelector();
+        HostDebug::log("Scenes restored: " + juce::String(sceneManager.getNumScenes()));
+    }
+}
+
+void MainComponent::armActionLearn(const ControlAction& action)
+{
+    pendingLearnAction = action;
+    expressionLearnArmed.store(false);
+    midiLearnArmed.store(true);
+    updateControlLabel();
+    HostDebug::log("Learn armed: " + action.toString());
+}
+
+void MainComponent::armExpressionLearn(int slotIndex, int paramIndex)
+{
+    pendingExprSlot = slotIndex;
+    pendingExprParam = paramIndex;
+    midiLearnArmed.store(false);
+    expressionLearnArmed.store(true);
+    updateControlLabel();
+    HostDebug::log("Expression learn armed: slot " + juce::String(slotIndex + 1) + " param " + juce::String(paramIndex));
+}
+
+void MainComponent::clearMappings()
+{
+    controlMap.clear();
+    midiLearnArmed.store(false);
+    expressionLearnArmed.store(false);
+    saveControlMap();
+    updateControlLabel();
+    HostDebug::log("Control mappings cleared");
+}
+
+void MainComponent::updateControlLabel()
+{
+    juce::String text;
+
+    if (midiLearnArmed.load())
+        text = "LEARN: press a MIDI control or key for [" + pendingLearnAction.toString() + "]";
+    else if (expressionLearnArmed.load())
+        text = "LEARN EXPR: move a CC for slot " + juce::String(pendingExprSlot + 1)
+             + " param " + juce::String(pendingExprParam);
+    else
+        text = "Maps: " + juce::String(controlMap.getNumBindings()) + " control, "
+             + juce::String(controlMap.getNumExpressions()) + " expression";
+
+    controlLabel.setText(text, juce::dontSendNotification);
+}
+
+void MainComponent::saveControlMap()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        if (auto xml = controlMap.toValueTree().createXml())
+            settings->setValue(controlMapStateKey, xml.get());
+
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::restoreControlMap()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    if (auto xml = settings->getXmlValue(controlMapStateKey))
+    {
+        controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        updateControlLabel();
+        HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
+    }
 }
 
 void MainComponent::timerCallback()
 {
+    updateControlLabel();
+
     juce::String text;
     text << "CPU " << juce::String(audioEngine.getCpuUsagePercent(), 0) << "%"
          << "   DSP " << juce::String(audioEngine.getDspLoadPercent(), 0) << "%"

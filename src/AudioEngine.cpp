@@ -32,11 +32,33 @@ void AudioEngine::start()
         deviceManager.addAudioCallback(this);
     else
         HostDebug::log("Audio callback not registered — no output device");
+
+    enableAllMidiInputs();
+}
+
+void AudioEngine::enableAllMidiInputs()
+{
+    const auto devices = juce::MidiInput::getAvailableDevices();
+
+    HostDebug::log("MIDI inputs available: " + juce::String(devices.size()));
+
+    for (const auto& device : devices)
+    {
+        if (! deviceManager.isMidiInputDeviceEnabled(device.identifier))
+            deviceManager.setMidiInputDeviceEnabled(device.identifier, true);
+
+        deviceManager.addMidiInputDeviceCallback(device.identifier, this);
+        HostDebug::log("  MIDI in enabled: " + device.name);
+    }
 }
 
 void AudioEngine::stop()
 {
     HostDebug::log("AudioEngine::stop");
+
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+        deviceManager.removeMidiInputDeviceCallback(device.identifier, this);
+
     deviceManager.removeAudioCallback(this);
 }
 
@@ -87,6 +109,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     }
 
     midiBuffer.clear();
+    midiCollector.removeNextBlockOfMessages(midiBuffer, numSamples);   // live MIDI input
 
     const auto startTicks = juce::Time::getHighResolutionTicks();
     pluginHost.processAudio(processingBuffer, midiBuffer);
@@ -127,6 +150,8 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     inputLatencySamples = device->getInputLatencyInSamples();
     outputLatencySamples = device->getOutputLatencyInSamples();
 
+    midiCollector.reset(device->getCurrentSampleRate());
+
     pluginHost.prepare(device->getCurrentSampleRate(),
                        device->getCurrentBufferSizeSamples(),
                        device->getActiveInputChannels().countNumberOfSetBits(),
@@ -136,6 +161,14 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 void AudioEngine::audioDeviceStopped()
 {
     HostDebug::log("Audio device stopped");
+}
+
+void AudioEngine::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)
+{
+    midiCollector.addMessageToQueue(message);   // forwarded to the plugin chain on the audio thread
+
+    if (onMidiForControl)
+        onMidiForControl(message);              // tapped for control mapping (Phase 4.2)
 }
 
 double AudioEngine::getInputLatencyMs() const

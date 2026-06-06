@@ -2,10 +2,12 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <functional>
 
 class PluginHost;
 
-class AudioEngine : public juce::AudioIODeviceCallback
+class AudioEngine : public juce::AudioIODeviceCallback,
+                    public juce::MidiInputCallback
 {
 public:
     explicit AudioEngine(PluginHost& host);
@@ -13,6 +15,12 @@ public:
 
     void start();
     void stop();
+
+    /** Enables every available MIDI input device and routes it into the engine. */
+    void enableAllMidiInputs();
+
+    /** Hook invoked (on the MIDI thread) for each incoming message, for control mapping. */
+    std::function<void(const juce::MidiMessage&)> onMidiForControl;
 
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
 
@@ -42,11 +50,14 @@ public:
     void audioDeviceAboutToStart(juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
 
+    void handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message) override;
+
 private:
     PluginHost& pluginHost;
     juce::AudioDeviceManager deviceManager;
     juce::AudioBuffer<float> processingBuffer;
     juce::MidiBuffer midiBuffer;
+    juce::MidiMessageCollector midiCollector;
 
     // metrics
     std::atomic<double> dspLoad { 0.0 };       // smoothed processAudio time / block time

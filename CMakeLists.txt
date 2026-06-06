@@ -37,6 +37,10 @@ target_sources(GtrFxSim
         src/PluginChain.cpp
         src/Preset.h
         src/Preset.cpp
+        src/ControlMap.h
+        src/ControlMap.cpp
+        src/SceneManager.h
+        src/SceneManager.cpp
         src/PluginHost.h
         src/PluginHost.cpp
         src/MainComponent.h

@@ -1,9 +1,12 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 #include "AudioEngine.h"
 #include "PluginHost.h"
 #include "PluginScanner.h"
+#include "ControlMap.h"
+#include "SceneManager.h"
 
 class MainComponent : public juce::Component,
                       private juce::Button::Listener,
@@ -90,6 +93,7 @@ private:
 
     void buttonClicked(juce::Button* button) override;
     void timerCallback() override;
+    bool keyPressed(const juce::KeyPress& key) override;
 
     void refreshPaletteList();
     void refreshChainList();
@@ -106,6 +110,28 @@ private:
     void loadPresetFile(const juce::File& file);
     void saveLastPresetPath(const juce::File& file);
     void tryRestoreLastPreset();
+
+    // Live control (Phase 4)
+    void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
+    void executeAction(const ControlAction& action);           // called on the message thread
+
+    // Scenes (Phase 4.5)
+    void captureScene();
+    void updateScene();
+    void deleteScene();
+    void recallScene(int index);
+    void stepScene(int delta);
+    void refreshSceneSelector();
+    void saveScenes();
+    void restoreScenes();
+
+    // Control mapping UI (Phase 4.7)
+    void armActionLearn(const ControlAction& action);
+    void armExpressionLearn(int slotIndex, int paramIndex);
+    void clearMappings();
+    void updateControlLabel();
+    void saveControlMap();
+    void restoreControlMap();
 
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
@@ -128,6 +154,19 @@ private:
     juce::TextButton editorButton        { "Open Editor" };
     juce::TextButton savePresetButton    { "Save Preset" };
     juce::TextButton loadPresetButton    { "Load Preset" };
+    juce::TextButton captureSceneButton  { "Capture Scene" };
+    juce::TextButton updateSceneButton   { "Update Scene" };
+    juce::TextButton deleteSceneButton   { "Delete Scene" };
+    juce::TextButton prevSceneButton     { "< Prev" };
+    juce::TextButton nextSceneButton     { "Next >" };
+    juce::ComboBox   sceneSelector;
+
+    juce::Label      controlLabel;
+    juce::TextButton learnBypassButton    { "Learn: Bypass" };
+    juce::TextButton learnExprButton      { "Learn: Expression" };
+    juce::TextButton learnSceneNextButton { "Learn: Scene+" };
+    juce::TextButton learnScenePrevButton { "Learn: Scene-" };
+    juce::TextButton clearMapsButton      { "Clear Maps" };
 
     juce::StringArray paletteNames;
     juce::StringArray chainNames;
@@ -139,10 +178,21 @@ private:
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
+    // ── Live control ───────────────────────────────────────────────────────────
+    ControlMap controlMap;
+    SceneManager sceneManager;
+    std::atomic<bool> midiLearnArmed { false };
+    ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
+    std::atomic<bool> expressionLearnArmed { false };
+    int pendingExprSlot = 0;
+    int pendingExprParam = 0;
+
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
     static constexpr const char* audioDeviceStateKey = "audioDeviceState";
     static constexpr const char* lastPresetPathKey   = "lastPresetPath";
+    static constexpr const char* scenesStateKey      = "scenes";
+    static constexpr const char* controlMapStateKey  = "controlMap";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

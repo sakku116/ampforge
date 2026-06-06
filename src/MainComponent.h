@@ -125,6 +125,14 @@ private:
     void saveScenes();
     void restoreScenes();
 
+    // Control mapping UI (Phase 4.7)
+    void armActionLearn(const ControlAction& action);
+    void armExpressionLearn(int slotIndex, int paramIndex);
+    void clearMappings();
+    void updateControlLabel();
+    void saveControlMap();
+    void restoreControlMap();
+
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
     AudioEngine audioEngine;
@@ -153,6 +161,13 @@ private:
     juce::TextButton nextSceneButton     { "Next >" };
     juce::ComboBox   sceneSelector;
 
+    juce::Label      controlLabel;
+    juce::TextButton learnBypassButton    { "Learn: Bypass" };
+    juce::TextButton learnExprButton      { "Learn: Expression" };
+    juce::TextButton learnSceneNextButton { "Learn: Scene+" };
+    juce::TextButton learnScenePrevButton { "Learn: Scene-" };
+    juce::TextButton clearMapsButton      { "Clear Maps" };
+
     juce::StringArray paletteNames;
     juce::StringArray chainNames;
     SimpleListModel paletteModel { paletteNames };
@@ -168,12 +183,16 @@ private:
     SceneManager sceneManager;
     std::atomic<bool> midiLearnArmed { false };
     ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
+    std::atomic<bool> expressionLearnArmed { false };
+    int pendingExprSlot = 0;
+    int pendingExprParam = 0;
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
     static constexpr const char* audioDeviceStateKey = "audioDeviceState";
     static constexpr const char* lastPresetPathKey   = "lastPresetPath";
     static constexpr const char* scenesStateKey      = "scenes";
+    static constexpr const char* controlMapStateKey  = "controlMap";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

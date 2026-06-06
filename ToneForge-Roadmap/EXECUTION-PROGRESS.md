@@ -22,8 +22,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 ## State
 - Current branch: `feat/phase-2-pedalboard`
 - Last good commit: (lihat `git log --oneline -1`)
-- Next task: 4.7 (live-control UI + merge) — on branch feat/phase-4-live-control
-- Build status: GREEN (4.6 expression pedal CC->param)
+- Next task: DONE — Phase 2, 3, 4 all merged to main. Scope complete.
+- Build status: GREEN (Phase 4 complete; startup smoke test passed)
 
 ## Konvensi
 - Branch per phase: `feat/phase-2-pedalboard`, `feat/phase-3-performance`, `feat/phase-4-live-control`. Merge ke `main` saat phase selesai & build hijau.
@@ -56,7 +56,10 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 - [x] 4.4 Footswitch (reuse ControlMap; CC on/off de-bounce)
 - [x] 4.5 Scenes (snapshot pedalboard, switch via crossfade)
 - [x] 4.6 Expression pedal (CC → parameter plugin)
-- [~] 4.7 UI live-control + build hijau + merge
+- [x] 4.7 UI live-control + build hijau + smoke test + merge
+
+## ✅ SCOPE COMPLETE — Phase 2, 3, 4 done & merged to main
+Resume not needed unless extending to Phase 5/6. To verify with real audio/MIDI hardware, run the app and exercise the 🔸 sign-off items below.
 
 ---
 

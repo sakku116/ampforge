@@ -37,7 +37,9 @@ MainComponent::MainComponent()
                      &upButton, &downButton, &bypassButton, &editorButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &deleteSceneButton,
-                     &prevSceneButton, &nextSceneButton })
+                     &prevSceneButton, &nextSceneButton,
+                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
+                     &learnScenePrevButton, &clearMapsButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -51,6 +53,10 @@ MainComponent::MainComponent()
             recallScene(idx);
     };
     addAndMakeVisible(sceneSelector);
+
+    controlLabel.setFont(juce::FontOptions(13.0f));
+    controlLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+    addAndMakeVisible(controlLabel);
 
     audioEngine.start();
     tryRestoreAudioDeviceState();
@@ -67,6 +73,7 @@ MainComponent::MainComponent()
         refreshPaletteList();
         tryRestoreLastPreset();
         restoreScenes();
+        restoreControlMap();
     });
 }
 
@@ -80,11 +87,14 @@ MainComponent::~MainComponent()
                      &upButton, &downButton, &bypassButton, &editorButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &deleteSceneButton,
-                     &prevSceneButton, &nextSceneButton })
+                     &prevSceneButton, &nextSceneButton,
+                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
+                     &learnScenePrevButton, &clearMapsButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
     saveScenes();
+    saveControlMap();
     pluginHost.clearChain();
     saveAudioDeviceState();
     audioEngine.stop();
@@ -127,6 +137,21 @@ void MainComponent::resized()
     nextSceneButton.setBounds(sceneRow.removeFromLeft(80));
 
     area.removeFromTop(10);
+
+    // Live-control row (bottom-most).
+    auto controlRow = area.removeFromBottom(32);
+    learnBypassButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    learnExprButton.setBounds(controlRow.removeFromLeft(140));
+    controlRow.removeFromLeft(6);
+    learnSceneNextButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    learnScenePrevButton.setBounds(controlRow.removeFromLeft(120));
+    controlRow.removeFromLeft(6);
+    clearMapsButton.setBounds(controlRow.removeFromLeft(100));
+    controlRow.removeFromLeft(10);
+    controlLabel.setBounds(controlRow);
+    area.removeFromBottom(8);
 
     // Chain action buttons live in a row at the bottom.
     auto bottomRow = area.removeFromBottom(36);
@@ -177,10 +202,41 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &deleteSceneButton)  { deleteScene();       return; }
     if (button == &prevSceneButton)    { stepScene(-1);       return; }
     if (button == &nextSceneButton)    { stepScene(+1);       return; }
+
+    if (button == &learnBypassButton)
+    {
+        armActionLearn({ ControlAction::Type::toggleBypass, juce::jmax(0, getSelectedChainRow()) });
+        return;
+    }
+    if (button == &learnExprButton)    { armExpressionLearn(juce::jmax(0, getSelectedChainRow()), 0); return; }
+    if (button == &learnSceneNextButton) { armActionLearn({ ControlAction::Type::nextScene, 0 }); return; }
+    if (button == &learnScenePrevButton) { armActionLearn({ ControlAction::Type::prevScene, 0 }); return; }
+    if (button == &clearMapsButton)    { clearMappings();     return; }
 }
 
 void MainComponent::handleControlMidi(const juce::MidiMessage& message)
 {
+    if (expressionLearnArmed.load())
+    {
+        if (! message.isController())
+            return;   // wait for a CC (expression) message
+
+        const int cc = message.getControllerNumber();
+        const int chan = message.getChannel();
+        const int slot = pendingExprSlot;
+        const int param = pendingExprParam;
+        expressionLearnArmed.store(false);
+
+        juce::MessageManager::callAsync([this, chan, cc, slot, param]
+        {
+            controlMap.addExpression({ chan, cc, slot, param });
+            saveControlMap();
+            HostDebug::log("Expression learn: CC " + juce::String(cc)
+                           + " -> slot " + juce::String(slot + 1) + " param " + juce::String(param));
+        });
+        return;
+    }
+
     if (midiLearnArmed.load())
     {
         if (message.isController() && message.getControllerValue() < 64)
@@ -197,6 +253,7 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
         juce::MessageManager::callAsync([this, trigger, action]
         {
             controlMap.addBinding({ trigger, action });
+            saveControlMap();
             HostDebug::log("MIDI learn: bound " + trigger.toString() + " -> " + action.toString());
         });
         return;
@@ -227,6 +284,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         const auto action = pendingLearnAction;
         midiLearnArmed.store(false);
         controlMap.addBinding({ trigger, action });
+        saveControlMap();
         HostDebug::log("Key learn: bound " + trigger.toString() + " -> " + action.toString());
         return true;
     }
@@ -363,8 +421,81 @@ void MainComponent::restoreScenes()
     }
 }
 
+void MainComponent::armActionLearn(const ControlAction& action)
+{
+    pendingLearnAction = action;
+    expressionLearnArmed.store(false);
+    midiLearnArmed.store(true);
+    updateControlLabel();
+    HostDebug::log("Learn armed: " + action.toString());
+}
+
+void MainComponent::armExpressionLearn(int slotIndex, int paramIndex)
+{
+    pendingExprSlot = slotIndex;
+    pendingExprParam = paramIndex;
+    midiLearnArmed.store(false);
+    expressionLearnArmed.store(true);
+    updateControlLabel();
+    HostDebug::log("Expression learn armed: slot " + juce::String(slotIndex + 1) + " param " + juce::String(paramIndex));
+}
+
+void MainComponent::clearMappings()
+{
+    controlMap.clear();
+    midiLearnArmed.store(false);
+    expressionLearnArmed.store(false);
+    saveControlMap();
+    updateControlLabel();
+    HostDebug::log("Control mappings cleared");
+}
+
+void MainComponent::updateControlLabel()
+{
+    juce::String text;
+
+    if (midiLearnArmed.load())
+        text = "LEARN: press a MIDI control or key for [" + pendingLearnAction.toString() + "]";
+    else if (expressionLearnArmed.load())
+        text = "LEARN EXPR: move a CC for slot " + juce::String(pendingExprSlot + 1)
+             + " param " + juce::String(pendingExprParam);
+    else
+        text = "Maps: " + juce::String(controlMap.getNumBindings()) + " control, "
+             + juce::String(controlMap.getNumExpressions()) + " expression";
+
+    controlLabel.setText(text, juce::dontSendNotification);
+}
+
+void MainComponent::saveControlMap()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        if (auto xml = controlMap.toValueTree().createXml())
+            settings->setValue(controlMapStateKey, xml.get());
+
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::restoreControlMap()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    if (auto xml = settings->getXmlValue(controlMapStateKey))
+    {
+        controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        updateControlLabel();
+        HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
+    }
+}
+
 void MainComponent::timerCallback()
 {
+    updateControlLabel();
+
     juce::String text;
     text << "CPU " << juce::String(audioEngine.getCpuUsagePercent(), 0) << "%"
          << "   DSP " << juce::String(audioEngine.getDspLoadPercent(), 0) << "%"

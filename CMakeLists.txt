@@ -130,11 +130,51 @@ else()
                    "Set -DASIO_SDK_DIR=<path> to enable ASIO.")
 endif()
 
+# ---------------------------------------------------------------------------
+# VST2 support (optional) — requires Steinberg VST2 SDK
+#   Headers needed: pluginterfaces/vst2.x/aeffect.h
+#   Set: -DVST2_SDK_DIR="C:/path/to/vst2sdk" at configure time
+#   OR place the SDK folder next to this CMakeLists.txt as "vst2sdk/"
+# ---------------------------------------------------------------------------
+option(ENABLE_VST2 "Build with VST2 plugin hosting support" OFF)
+
+if(NOT ENABLE_VST2 AND VST2_SDK_DIR)
+    set(ENABLE_VST2 ON)
+endif()
+
+if(NOT ENABLE_VST2)
+    foreach(_candidate
+            "${CMAKE_SOURCE_DIR}/vst2sdk"
+            "${CMAKE_SOURCE_DIR}/VST_SDK"
+            "${CMAKE_SOURCE_DIR}/vstsdk2.4"
+            "C:/VST2_SDK"
+            "C:/Program Files/Steinberg/VST2 SDK")
+        if(EXISTS "${_candidate}/pluginterfaces/vst2.x/aeffect.h")
+            set(VST2_SDK_DIR "${_candidate}" CACHE PATH "Steinberg VST2 SDK directory")
+            set(ENABLE_VST2 ON)
+            break()
+        endif()
+    endforeach()
+endif()
+
+set(_juce_vst2_flag 0)
+if(ENABLE_VST2)
+    message(STATUS "VST2 enabled. SDK: ${VST2_SDK_DIR}")
+    set(_juce_vst2_flag 1)
+    target_include_directories(GtrFxSim             PRIVATE "${VST2_SDK_DIR}")
+    target_include_directories(GuitarVST3ScanWorker PRIVATE "${VST2_SDK_DIR}")
+    target_compile_definitions(GuitarVST3ScanWorker PRIVATE JUCE_PLUGINHOST_VST=1)
+else()
+    message(STATUS "VST2 SDK not found — building without VST2 support. "
+                   "Set -DVST2_SDK_DIR=<path> to enable.")
+endif()
+
 target_compile_definitions(GtrFxSim
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
+        JUCE_PLUGINHOST_VST=${_juce_vst2_flag}
         JUCE_ASIO=${_juce_asio_flag}
 )
 

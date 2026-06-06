@@ -324,6 +324,18 @@ bool PluginChain::isBypassed(int index) const
     return juce::isPositiveAndBelow(index, (int) cur->size()) && (*cur)[(size_t) index]->bypassed.load();
 }
 
+int PluginChain::getTotalLatencySamples() const
+{
+    auto cur = currentList();
+    int total = 0;
+
+    for (const auto& slot : *cur)
+        if (slot->instance != nullptr && ! slot->bypassed.load())
+            total += slot->instance->getLatencySamples();
+
+    return total;
+}
+
 juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 {
     auto cur = currentList();

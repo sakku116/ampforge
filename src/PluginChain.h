@@ -59,6 +59,8 @@ public:
     int getNumSlots() const;
     juce::Array<SlotInfo> getSlotInfos() const;
     bool isBypassed(int index) const;
+    /** Sum of reported latency (samples) of active, non-bypassed slots. */
+    int getTotalLatencySamples() const;
     juce::Array<SlotSpec> captureSpecs() const;
     juce::AudioPluginInstance* getInstance(int index) const;
 

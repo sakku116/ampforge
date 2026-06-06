@@ -24,6 +24,7 @@ public:
 
     int getNumSlots() const { return chain.getNumSlots(); }
     juce::Array<PluginChain::SlotInfo> getSlotInfos() const { return chain.getSlotInfos(); }
+    int getChainLatencySamples() const { return chain.getTotalLatencySamples(); }
 
     /** Rebuilds the whole chain from preset/scene specs (closes editors first). */
     bool rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs);

@@ -5,25 +5,48 @@ namespace Preset
 {
 namespace
 {
-    const juce::Identifier presetType  ("TONEFORGE_PRESET");
-    const juce::Identifier slotType    ("SLOT");
-    const juce::Identifier pluginTag   ("PLUGIN");   // tag produced by PluginDescription::createXml()
-    const juce::Identifier propName    ("name");
-    const juce::Identifier propVersion ("version");
-    const juce::Identifier propBypassed("bypassed");
-    const juce::Identifier propState   ("state");
+    const juce::Identifier presetType    ("TONEFORGE_PRESET");
+    const juce::Identifier slotType      ("SLOT");
+    const juce::Identifier sectionType   ("SECTION");
+    const juce::Identifier pluginTag     ("PLUGIN");   // tag produced by PluginDescription::createXml()
+    const juce::Identifier propName      ("name");
+    const juce::Identifier propVersion   ("version");
+    const juce::Identifier propBypassed  ("bypassed");
+    const juce::Identifier propState     ("state");
+    const juce::Identifier propCustomName("customName");
+    const juce::Identifier propSectionId ("sectionId");
+    const juce::Identifier propSectionName("sectionName");
+    const juce::Identifier propSectionType("sectionType");
 }
 
-juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs, const juce::String& name)
+juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
+                             const juce::Array<PluginChain::SectionDef>& sections,
+                             const juce::String& name)
 {
     juce::ValueTree root(presetType);
     root.setProperty(propName, name, nullptr);
-    root.setProperty(propVersion, 1, nullptr);
+    root.setProperty(propVersion, 2, nullptr);
+
+    for (const auto& sec : sections)
+    {
+        juce::ValueTree secNode(sectionType);
+        secNode.setProperty(propSectionId,   sec.id,   nullptr);
+        secNode.setProperty(propSectionName, sec.name, nullptr);
+        secNode.setProperty(propSectionType,
+                            sec.type == PluginChain::SectionDef::Type::preset
+                                ? juce::String("preset") : juce::String("stomp"),
+                            nullptr);
+        root.addChild(secNode, -1, nullptr);
+    }
 
     for (const auto& spec : specs)
     {
         juce::ValueTree slot(slotType);
-        slot.setProperty(propBypassed, spec.bypassed, nullptr);
+        slot.setProperty(propBypassed,  spec.bypassed,  nullptr);
+        slot.setProperty(propSectionId, spec.sectionId, nullptr);
+
+        if (spec.customName.isNotEmpty())
+            slot.setProperty(propCustomName, spec.customName, nullptr);
 
         if (spec.state.getSize() > 0)
             slot.setProperty(propState, spec.state.toBase64Encoding(), nullptr);
@@ -37,22 +60,55 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs, con
     return root;
 }
 
-bool fromValueTree(const juce::ValueTree& tree, juce::Array<PluginChain::SlotSpec>& outSpecs)
+juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs, const juce::String& name)
+{
+    // Delegate: all slots go into a synthetic "Stomp 1" section.
+    juce::Array<PluginChain::SectionDef> secs;
+    secs.add({ 1, "Stomp 1", PluginChain::SectionDef::Type::stomp });
+    return toValueTree(specs, secs, name);
+}
+
+bool fromValueTree(const juce::ValueTree& tree,
+                   juce::Array<PluginChain::SlotSpec>& outSpecs,
+                   juce::Array<PluginChain::SectionDef>& outSections)
 {
     if (! tree.hasType(presetType))
         return false;
 
     outSpecs.clear();
+    outSections.clear();
 
+    // Read SECTION nodes.
+    for (int i = 0; i < tree.getNumChildren(); ++i)
+    {
+        auto child = tree.getChild(i);
+        if (! child.hasType(sectionType))
+            continue;
+
+        PluginChain::SectionDef def;
+        def.id   = (int) child.getProperty(propSectionId, 1);
+        def.name = child.getProperty(propSectionName, "Stomp 1").toString();
+        def.type = child.getProperty(propSectionType, "stomp").toString() == "preset"
+                   ? PluginChain::SectionDef::Type::preset
+                   : PluginChain::SectionDef::Type::stomp;
+        outSections.add(def);
+    }
+
+    // v1 migration: no SECTION nodes → synthesise a single "Stomp 1" section.
+    if (outSections.isEmpty())
+        outSections.add({ 1, "Stomp 1", PluginChain::SectionDef::Type::stomp });
+
+    // Read SLOT nodes.
     for (int i = 0; i < tree.getNumChildren(); ++i)
     {
         auto slot = tree.getChild(i);
-
         if (! slot.hasType(slotType))
             continue;
 
         PluginChain::SlotSpec spec;
-        spec.bypassed = (bool) slot.getProperty(propBypassed, false);
+        spec.bypassed   = (bool) slot.getProperty(propBypassed, false);
+        spec.customName = slot.getProperty(propCustomName, juce::String()).toString();
+        spec.sectionId  = (int) slot.getProperty(propSectionId, outSections[0].id);
 
         const auto stateStr = slot.getProperty(propState, juce::String()).toString();
         if (stateStr.isNotEmpty())
@@ -69,11 +125,18 @@ bool fromValueTree(const juce::ValueTree& tree, juce::Array<PluginChain::SlotSpe
     return true;
 }
 
+bool fromValueTree(const juce::ValueTree& tree, juce::Array<PluginChain::SlotSpec>& outSpecs)
+{
+    juce::Array<PluginChain::SectionDef> ignoredSections;
+    return fromValueTree(tree, outSpecs, ignoredSections);
+}
+
 bool saveToFile(const juce::Array<PluginChain::SlotSpec>& specs,
+                const juce::Array<PluginChain::SectionDef>& sections,
                 const juce::String& name,
                 const juce::File& file)
 {
-    auto tree = toValueTree(specs, name);
+    auto tree = toValueTree(specs, sections, name);
 
     if (auto xml = tree.createXml())
     {
@@ -85,7 +148,9 @@ bool saveToFile(const juce::Array<PluginChain::SlotSpec>& specs,
     return false;
 }
 
-bool loadFromFile(const juce::File& file, juce::Array<PluginChain::SlotSpec>& outSpecs)
+bool loadFromFile(const juce::File& file,
+                  juce::Array<PluginChain::SlotSpec>& outSpecs,
+                  juce::Array<PluginChain::SectionDef>& outSections)
 {
     if (! file.existsAsFile())
     {
@@ -102,9 +167,10 @@ bool loadFromFile(const juce::File& file, juce::Array<PluginChain::SlotSpec>& ou
     }
 
     auto tree = juce::ValueTree::fromXml(*xml);
-    const bool ok = fromValueTree(tree, outSpecs);
+    const bool ok = fromValueTree(tree, outSpecs, outSections);
     HostDebug::log("Preset load " + juce::String(ok ? "OK" : "FAILED") + ": " + file.getFullPathName()
-                   + " (" + juce::String(outSpecs.size()) + " slot(s))");
+                   + " (" + juce::String(outSpecs.size()) + " slot(s), "
+                   + juce::String(outSections.size()) + " section(s))");
     return ok;
 }
 

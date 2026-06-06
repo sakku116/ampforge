@@ -18,11 +18,24 @@
 class PluginChain
 {
 public:
+    /** A named grouping of slots. Stomp = independent bypass; Preset = exclusive/radio. */
+    struct SectionDef
+    {
+        enum class Type { stomp, preset };
+        int          id   = 0;
+        juce::String name;
+        Type         type = Type::stomp;
+    };
+
     struct SlotInfo
     {
-        juce::String name;
+        juce::String name;        // display name (customName if set, otherwise plugin name)
+        juce::String originalName; // always the plugin's own name
         juce::String format;
         bool bypassed = false;
+        bool hasCustomName = false;
+        int  sectionId = 1;
+        bool isPreset  = false;
     };
 
     struct SlotSpec
@@ -30,22 +43,48 @@ public:
         juce::PluginDescription description;
         juce::MemoryBlock state;   // AudioPluginInstance::getStateInformation payload (may be empty)
         bool bypassed = false;
+        juce::String customName;   // empty = use plugin's own name
+        int sectionId = 1;
     };
 
     explicit PluginChain(juce::AudioPluginFormatManager& formatManager);
     ~PluginChain();
 
+    // ── Section management (message thread) ─────────────────────────────────
+    int  addSection(SectionDef::Type type);
+    void removeSection(int sectionId);
+    void renameSection(int sectionId, const juce::String& name);
+    void moveSectionUp(int sectionId);
+    void moveSectionDown(int sectionId);
+    juce::Array<SectionDef> getSectionDefs() const;
+    int  getDefaultSectionId() const;
+    juce::Array<SectionDef> captureSectionDefs() const;
+
+    /** Exclusive-activate one slot inside a preset section (atomic, no republish). */
+    void activatePresetSlot(int slotIndex);
+
     // ── Structural edits (message thread) ────────────────────────────────────
+    /** Add plugin into a specific section; inserts after last slot of that section. */
+    bool addPlugin(const juce::PluginDescription& description, int sectionId);
+    /** Compat overload: adds to the last section. */
     bool addPlugin(const juce::PluginDescription& description);
     void removePlugin(int index);
-    void movePlugin(int fromIndex, int toIndex);
+    /** Moves a slot. If sectionIdOverride >= 0, assigns that section instead of inheriting
+        from the displaced slot. Handles from == toIndex as a section-only change. */
+    void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);
+    /** Sets a user-visible display name on a slot. Empty string resets to plugin's own name. */
+    void renameSlot(int index, const juce::String& newName);
     void clear();
     bool rebuildFrom(const juce::Array<SlotSpec>& specs);
+    bool rebuildFrom(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections);
 
     // ── Live switching (Phase 3) ─────────────────────────────────────────────
     /** Builds a new chain and crossfades into it over crossfadeMs (0 = instant). */
     bool switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs);
+    bool switchWithCrossfade(const juce::Array<SlotSpec>& specs,
+                             const juce::Array<SectionDef>& sections,
+                             int crossfadeMs);
     bool isTransitioning() const { return fadeInList.load() != nullptr; }
 
     /** Builds a chain ahead of the switch moment; returns a handle (>0). */
@@ -77,6 +116,8 @@ private:
         std::unique_ptr<juce::AudioPluginInstance> instance;
         std::atomic<bool> bypassed { false };
         juce::PluginDescription description;
+        juce::String customName;   // empty = use instance->getName(). Message-thread only.
+        int sectionId = 1;         // message-thread only
     };
 
     using SlotList = std::vector<std::shared_ptr<Slot>>;
@@ -86,6 +127,10 @@ private:
     std::shared_ptr<SlotList> buildList(const juce::Array<SlotSpec>& specs, bool& allOk);
 
     std::shared_ptr<SlotList> currentList() const { return activeList.load(); }
+    // During a crossfade, returns the incoming (target) list — used by UI queries so the
+    // display reflects the intended new chain immediately rather than waiting ~25 ms for the
+    // audio thread to promote fadeInList to activeList.
+    std::shared_ptr<SlotList> displayList() const;
     void publish(std::shared_ptr<SlotList> next);                          // call under editLock
     void publishWithCrossfade(std::shared_ptr<SlotList> next, int ms);     // call under editLock
     void reclaimRetired();                                                 // call under editLock
@@ -93,6 +138,11 @@ private:
     static void runList(const SlotList& list, juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
 
     juce::AudioPluginFormatManager& formatManager;
+
+    std::vector<SectionDef> sectionDefs;
+    int nextSectionId   = 2;   // 1 is reserved for the default "Stomp 1"
+    int nextStompCount  = 1;   // "Stomp 1" already exists
+    int nextPresetCount = 0;
 
     std::atomic<std::shared_ptr<SlotList>> activeList { std::make_shared<SlotList>() };
     std::atomic<std::shared_ptr<SlotList>> fadeInList { nullptr };   // incoming chain during a crossfade

@@ -11,16 +11,23 @@ juce::StringArray SceneManager::getSceneNames() const
     return names;
 }
 
-int SceneManager::addScene(const juce::String& name, juce::Array<PluginChain::SlotSpec> specs)
+int SceneManager::addScene(const juce::String& name,
+                           juce::Array<PluginChain::SlotSpec> specs,
+                           juce::Array<PluginChain::SectionDef> sections)
 {
-    scenes.push_back({ name, std::move(specs) });
+    scenes.push_back({ name, std::move(specs), std::move(sections) });
     return (int) scenes.size() - 1;
 }
 
-void SceneManager::replaceScene(int index, juce::Array<PluginChain::SlotSpec> specs)
+void SceneManager::replaceScene(int index,
+                                juce::Array<PluginChain::SlotSpec> specs,
+                                juce::Array<PluginChain::SectionDef> sections)
 {
     if (juce::isPositiveAndBelow(index, (int) scenes.size()))
-        scenes[(size_t) index].specs = std::move(specs);
+    {
+        scenes[(size_t) index].specs    = std::move(specs);
+        scenes[(size_t) index].sections = std::move(sections);
+    }
 }
 
 void SceneManager::renameScene(int index, const juce::String& name)
@@ -52,7 +59,7 @@ juce::ValueTree SceneManager::toValueTree() const
     root.setProperty("current", currentIndex, nullptr);
 
     for (const auto& scene : scenes)
-        root.addChild(Preset::toValueTree(scene.specs, scene.name), -1, nullptr);
+        root.addChild(Preset::toValueTree(scene.specs, scene.sections, scene.name), -1, nullptr);
 
     return root;
 }
@@ -72,7 +79,7 @@ void SceneManager::fromValueTree(const juce::ValueTree& tree)
 
         Scene scene;
         scene.name = child.getProperty("name", "Scene " + juce::String(i + 1)).toString();
-        Preset::fromValueTree(child, scene.specs);
+        Preset::fromValueTree(child, scene.specs, scene.sections);
         scenes.push_back(std::move(scene));
     }
 

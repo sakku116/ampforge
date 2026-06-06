@@ -15,11 +15,24 @@ public:
     juce::AudioPluginFormatManager& getFormatManager() { return formatManager; }
     PluginChain& getChain() { return chain; }
 
+    // ── Section management (message thread) ─────────────────────────────────
+    int  addSection(PluginChain::SectionDef::Type t)          { return chain.addSection(t); }
+    void removeSection(int id)                                 { chain.removeSection(id); }
+    void renameSection(int id, const juce::String& n)         { chain.renameSection(id, n); }
+    void moveSectionUp(int id)                                 { chain.moveSectionUp(id); }
+    void moveSectionDown(int id)                               { chain.moveSectionDown(id); }
+    juce::Array<PluginChain::SectionDef> getSectionDefs() const { return chain.getSectionDefs(); }
+    int  getDefaultSectionId() const                           { return chain.getDefaultSectionId(); }
+    juce::Array<PluginChain::SectionDef> captureSectionDefs() const { return chain.captureSectionDefs(); }
+    void activatePresetSlot(int i)                             { chain.activatePresetSlot(i); }
+
     // ── Chain editing (message thread) ───────────────────────────────────────
     bool addPlugin(const juce::PluginDescription& description);
+    bool addPlugin(const juce::PluginDescription& description, int sectionId);
     void removePlugin(int index);
-    void movePlugin(int fromIndex, int toIndex);
+    void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);
+    void renameSlot(int index, const juce::String& newName) { chain.renameSlot(index, newName); }
     void clearChain();
 
     int getNumSlots() const { return chain.getNumSlots(); }
@@ -32,8 +45,13 @@ public:
 
     /** Rebuilds the whole chain from preset/scene specs (closes editors first). */
     bool rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs);
+    bool rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs,
+                      const juce::Array<PluginChain::SectionDef>& sections);
     /** Crossfade-switches the chain to a new preset/scene (closes editors first). */
     bool switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs);
+    bool switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs,
+                                  const juce::Array<PluginChain::SectionDef>& sections,
+                                  int crossfadeMs);
     juce::Array<PluginChain::SlotSpec> captureChain() const { return chain.captureSpecs(); }
 
     // Preloaded switching (build ahead, then switch in <50 ms) — used by scenes.

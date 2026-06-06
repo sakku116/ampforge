@@ -44,9 +44,10 @@ juce::String ControlAction::toString() const
         case Type::nextScene:    return "Next Scene";
         case Type::prevScene:    return "Prev Scene";
         case Type::loadScene:    return "Load Scene " + juce::String(index + 1);
-        case Type::toggleBypass: return "Toggle Bypass slot " + juce::String(index + 1);
+        case Type::toggleBypass:       return "Toggle Bypass slot " + juce::String(index + 1);
+        case Type::activatePresetSlot: return "Activate Preset Slot " + juce::String(index + 1);
         case Type::none:
-        default:                 return "—";
+        default:                       return "—";
     }
 }
 

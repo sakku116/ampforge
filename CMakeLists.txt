@@ -43,6 +43,10 @@ target_sources(GtrFxSim
         src/SceneManager.cpp
         src/PluginHost.h
         src/PluginHost.cpp
+        src/ToneForgeLookAndFeel.h
+        src/ToneForgeLookAndFeel.cpp
+        src/ChainListBox.h
+        src/ChainListBox.cpp
         src/MainComponent.h
         src/MainComponent.cpp
         src/HostDebug.h

@@ -54,15 +54,20 @@ bool PluginHost::addPlugin(const juce::PluginDescription& description)
     return chain.addPlugin(description);
 }
 
+bool PluginHost::addPlugin(const juce::PluginDescription& description, int sectionId)
+{
+    return chain.addPlugin(description, sectionId);
+}
+
 void PluginHost::removePlugin(int index)
 {
     closeAllEditors();   // editors reference instances about to be deleted
     chain.removePlugin(index);
 }
 
-void PluginHost::movePlugin(int fromIndex, int toIndex)
+void PluginHost::movePlugin(int fromIndex, int toIndex, int sectionIdOverride)
 {
-    chain.movePlugin(fromIndex, toIndex);   // instances persist, editors stay valid
+    chain.movePlugin(fromIndex, toIndex, sectionIdOverride);
 }
 
 void PluginHost::setBypass(int index, bool shouldBypass)
@@ -82,10 +87,25 @@ bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs)
     return chain.rebuildFrom(specs);
 }
 
+bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs,
+                              const juce::Array<PluginChain::SectionDef>& sections)
+{
+    closeAllEditors();
+    return chain.rebuildFrom(specs, sections);
+}
+
 bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs)
 {
     closeAllEditors();
     return chain.switchWithCrossfade(specs, crossfadeMs);
+}
+
+bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs,
+                                          const juce::Array<PluginChain::SectionDef>& sections,
+                                          int crossfadeMs)
+{
+    closeAllEditors();
+    return chain.switchWithCrossfade(specs, sections, crossfadeMs);
 }
 
 // ── Editor ─────────────────────────────────────────────────────────────────

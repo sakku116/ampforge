@@ -20,7 +20,7 @@ struct ControlTrigger
 /** What a trigger does. Scene actions become live once scenes exist (Phase 4.5). */
 struct ControlAction
 {
-    enum class Type { none, nextScene, prevScene, loadScene, toggleBypass };
+    enum class Type { none, nextScene, prevScene, loadScene, toggleBypass, activatePresetSlot };
 
     Type type = Type::none;
     int index = 0;   // scene index (loadScene) or slot index (toggleBypass)

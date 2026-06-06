@@ -6,7 +6,8 @@
 #include "PluginScanner.h"
 
 class MainComponent : public juce::Component,
-                      private juce::Button::Listener
+                      private juce::Button::Listener,
+                      private juce::Timer
 {
 public:
     MainComponent();
@@ -88,6 +89,7 @@ private:
     void tryRestoreAudioDeviceState();
 
     void buttonClicked(juce::Button* button) override;
+    void timerCallback() override;
 
     void refreshPaletteList();
     void refreshChainList();
@@ -112,6 +114,7 @@ private:
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
+    juce::Label metricsLabel;
     juce::Label paletteLabel { {}, "Scanned Plugins" };
     juce::Label chainLabel   { {}, "Pedalboard Chain" };
 

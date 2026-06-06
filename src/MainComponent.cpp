@@ -14,6 +14,12 @@ MainComponent::MainComponent()
     titleLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
     addAndMakeVisible(titleLabel);
 
+    metricsLabel.setFont(juce::FontOptions(13.0f));
+    metricsLabel.setColour(juce::Label::textColourId, juce::Colours::lightgreen);
+    metricsLabel.setJustificationType(juce::Justification::centredRight);
+    metricsLabel.setText("CPU --  DSP --  Latency --", juce::dontSendNotification);
+    addAndMakeVisible(metricsLabel);
+
     paletteLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
     chainLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
     addAndMakeVisible(paletteLabel);
@@ -37,6 +43,8 @@ MainComponent::MainComponent()
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
+    startTimerHz(10);   // performance metrics refresh
+
     HostDebug::log("MainComponent ready — scheduling VST3 scan");
 
     juce::MessageManager::callAsync([this]
@@ -50,6 +58,8 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     HostDebug::log("MainComponent destroying");
+
+    stopTimer();
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
                      &upButton, &downButton, &bypassButton, &editorButton,
@@ -67,7 +77,9 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds().reduced(12);
 
-    titleLabel.setBounds(area.removeFromTop(36));
+    auto titleRow = area.removeFromTop(36);
+    metricsLabel.setBounds(titleRow.removeFromRight(380));
+    titleLabel.setBounds(titleRow);
     area.removeFromTop(8);
 
     auto topRow = area.removeFromTop(36);
@@ -127,6 +139,18 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &editorButton) { openSelectedEditor();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
+}
+
+void MainComponent::timerCallback()
+{
+    juce::String text;
+    text << "CPU " << juce::String(audioEngine.getCpuUsagePercent(), 0) << "%"
+         << "   DSP " << juce::String(audioEngine.getDspLoadPercent(), 0) << "%"
+         << "   Lat " << juce::String(audioEngine.getRoundTripLatencyMs(), 1) << " ms"
+         << "  (" << juce::String((int) audioEngine.getCurrentSampleRate()) << " Hz / "
+         << juce::String(audioEngine.getCurrentBlockSize()) << ")";
+
+    metricsLabel.setText(text, juce::dontSendNotification);
 }
 
 void MainComponent::refreshPaletteList()

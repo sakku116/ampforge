@@ -103,9 +103,25 @@ MainComponent::MainComponent()
     {
         pluginScanner.scanDefaultWindowsVST3Folders();
         refreshPaletteList();
-        tryRestoreLastPreset();
+
+        // Restore scenes first so we know whether an active scene should own the chain.
         restoreScenes();
         restoreControlMap();
+
+        const int activeScene = sceneManager.getCurrentIndex();
+
+        if (juce::isPositiveAndBelow(activeScene, sceneManager.getNumScenes()))
+        {
+            // Active scene takes priority: rebuild immediately (no crossfade from empty chain).
+            pluginHost.rebuildChain(sceneManager.getScene(activeScene).specs);
+            refreshChainList();
+            HostDebug::log("Startup: applied scene " + juce::String(activeScene));
+        }
+        else
+        {
+            // No active scene — fall back to last saved preset.
+            tryRestoreLastPreset();
+        }
     });
 }
 

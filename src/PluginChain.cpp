@@ -110,6 +110,12 @@ void PluginChain::runList(const SlotList& list, juce::AudioBuffer<float>& buffer
     }
 }
 
+std::shared_ptr<PluginChain::SlotList> PluginChain::displayList() const
+{
+    auto pending = fadeInList.load();
+    return pending != nullptr ? pending : activeList.load();
+}
+
 void PluginChain::reclaimRetired()
 {
     // Drop old lists the audio thread no longer references (use_count() <= 1 means only
@@ -303,12 +309,12 @@ void PluginChain::releasePreload(int handle)
 
 int PluginChain::getNumSlots() const
 {
-    return (int) currentList()->size();
+    return (int) displayList()->size();
 }
 
 juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
 {
-    auto cur = currentList();
+    auto cur = displayList();
     juce::Array<SlotInfo> infos;
 
     for (const auto& slot : *cur)
@@ -343,7 +349,7 @@ int PluginChain::getTotalLatencySamples() const
 
 juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 {
-    auto cur = currentList();
+    auto cur = displayList();
     juce::Array<SlotSpec> specs;
 
     for (const auto& slot : *cur)
@@ -363,7 +369,7 @@ juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 
 juce::AudioPluginInstance* PluginChain::getInstance(int index) const
 {
-    auto cur = currentList();
+    auto cur = displayList();
 
     if (juce::isPositiveAndBelow(index, (int) cur->size()))
         return (*cur)[(size_t) index]->instance.get();

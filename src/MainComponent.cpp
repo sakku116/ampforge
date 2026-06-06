@@ -148,6 +148,9 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
 {
     if (midiLearnArmed.load())
     {
+        if (message.isController() && message.getControllerValue() < 64)
+            return;   // wait for the footswitch/button "on", not the release
+
         const auto trigger = ControlMap::triggerFromMidi(message);
 
         if (! trigger.isValid())

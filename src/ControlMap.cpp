@@ -97,6 +97,11 @@ ControlAction ControlMap::match(const ControlTrigger& incoming) const
 
 ControlAction ControlMap::matchMidi(const juce::MidiMessage& message) const
 {
+    // Footswitches/buttons usually send a CC "on" (>=64) then "off" (<64); only act on "on"
+    // so a discrete action fires once per press, not again on release.
+    if (message.isController() && message.getControllerValue() < 64)
+        return {};
+
     return match(triggerFromMidi(message));
 }
 

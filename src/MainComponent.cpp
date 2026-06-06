@@ -6,35 +6,53 @@ MainComponent::MainComponent()
     : audioEngine(pluginHost),
       pluginScanner(pluginHost.getFormatManager())
 {
+    juce::LookAndFeel::setDefaultLookAndFeel(&lookAndFeel);
+    setLookAndFeel(&lookAndFeel);
+
     initialiseSettings();
 
-    setSize(960, 620);
+    setSize(1000, 660);
     setWantsKeyboardFocus(true);   // receive key presses for keyboard/footswitch mapping
 
-    titleLabel.setText("ToneForge - VST3 Pedalboard", juce::dontSendNotification);
-    titleLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+    titleLabel.setText("ToneForge", juce::dontSendNotification);
+    titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
+    titleLabel.setColour(juce::Label::textColourId, tf::colour::text);
     addAndMakeVisible(titleLabel);
 
     metricsLabel.setFont(juce::FontOptions(13.0f));
-    metricsLabel.setColour(juce::Label::textColourId, juce::Colours::lightgreen);
+    metricsLabel.setColour(juce::Label::textColourId, tf::colour::accent);
     metricsLabel.setJustificationType(juce::Justification::centredRight);
     metricsLabel.setText("CPU --  DSP --  Latency --", juce::dontSendNotification);
     addAndMakeVisible(metricsLabel);
 
-    paletteLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
-    chainLabel.setFont(juce::FontOptions(15.0f, juce::Font::bold));
-    addAndMakeVisible(paletteLabel);
-    addAndMakeVisible(chainLabel);
+    // Section headers: small, bold, accent-coloured.
+    for (auto* l : { &paletteLabel, &chainLabel, &sceneLabel, &controlSectionLabel })
+    {
+        l->setFont(juce::FontOptions(12.5f, juce::Font::bold));
+        l->setColour(juce::Label::textColourId, tf::colour::accent);
+        addAndMakeVisible(*l);
+    }
 
     paletteListBox.setModel(&paletteModel);
+    paletteListBox.setRowHeight(26);
+    paletteListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
     chainListBox.setModel(&chainModel);
+    chainListBox.setRowHeight(52);
+    chainListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
     addAndMakeVisible(paletteListBox);
     addAndMakeVisible(chainListBox);
 
-    chainModel.onDoubleClick = [this](int row) { pluginHost.openEditorWindow(row); };
+    // Double-click a library item to add it; the chain rows carry their own buttons.
+    paletteModel.onDoubleClick = [this](int) { addSelectedToChain(); };
 
-    for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
-                     &upButton, &downButton, &bypassButton, &editorButton,
+    chainModel.onBypass   = [this](int r) { toggleBypassAt(r); };
+    chainModel.onMoveUp   = [this](int r) { moveSlotAt(r, -1); };
+    chainModel.onMoveDown = [this](int r) { moveSlotAt(r, +1); };
+    chainModel.onRemove   = [this](int r) { removeSlotAt(r); };
+    chainModel.onEditor   = [this](int r) { openEditorAt(r); };
+    chainModel.onSelect   = [this](int r) { chainListBox.selectRow(r); };
+
+    for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &deleteSceneButton,
                      &prevSceneButton, &nextSceneButton,
@@ -44,6 +62,12 @@ MainComponent::MainComponent()
         b->addListener(this);
         addAndMakeVisible(*b);
     }
+
+    // Primary action stands out; destructive actions read as danger.
+    addButton.setColour(juce::TextButton::buttonColourId, tf::colour::accent);
+    addButton.setColour(juce::TextButton::textColourOffId, juce::Colours::black);
+    deleteSceneButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
+    clearMapsButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
 
     sceneSelector.setTextWhenNothingSelected("(no scenes)");
     sceneSelector.onChange = [this]
@@ -55,7 +79,8 @@ MainComponent::MainComponent()
     addAndMakeVisible(sceneSelector);
 
     controlLabel.setFont(juce::FontOptions(13.0f));
-    controlLabel.setColour(juce::Label::textColourId, juce::Colours::orange);
+    controlLabel.setColour(juce::Label::textColourId, tf::colour::warn);
+    controlLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(controlLabel);
 
     audioEngine.start();
@@ -83,8 +108,7 @@ MainComponent::~MainComponent()
 
     stopTimer();
 
-    for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
-                     &upButton, &downButton, &bypassButton, &editorButton,
+    for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &deleteSceneButton,
                      &prevSceneButton, &nextSceneButton,
@@ -99,82 +123,122 @@ MainComponent::~MainComponent()
     saveAudioDeviceState();
     audioEngine.stop();
     appProperties.saveIfNeeded();
+
+    setLookAndFeel(nullptr);
+    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+}
+
+void MainComponent::paint(juce::Graphics& g)
+{
+    g.fillAll(tf::colour::background);
+
+    auto drawPanel = [&g](juce::Rectangle<int> r)
+    {
+        if (r.isEmpty())
+            return;
+
+        g.setColour(tf::colour::surface);
+        g.fillRoundedRectangle(r.toFloat(), 9.0f);
+        g.setColour(tf::colour::outline);
+        g.drawRoundedRectangle(r.toFloat().reduced(0.5f), 9.0f, 1.0f);
+    };
+
+    drawPanel(headerPanel);
+    drawPanel(libraryPanel);
+    drawPanel(chainPanel);
+    drawPanel(footerPanel);
+
+    // Accent flourish under the title.
+    if (! headerPanel.isEmpty())
+    {
+        const auto s = headerPanel.toFloat();
+        g.setColour(tf::colour::accent);
+        g.fillRect(s.getX() + 16.0f, s.getBottom() - 8.0f, 44.0f, 3.0f);
+    }
 }
 
 void MainComponent::resized()
 {
-    auto area = getLocalBounds().reduced(12);
+    const int pad = 14, gap = 10, rowH = 34, footerH = 100;
+    auto area = getLocalBounds().reduced(pad);
 
-    auto titleRow = area.removeFromTop(36);
-    metricsLabel.setBounds(titleRow.removeFromRight(380));
-    titleLabel.setBounds(titleRow);
-    area.removeFromTop(8);
-
-    auto topRow = area.removeFromTop(36);
-    audioSettingsButton.setBounds(topRow.removeFromLeft(140));
-    topRow.removeFromLeft(8);
-    scanButton.setBounds(topRow.removeFromLeft(160));
-    topRow.removeFromLeft(8);
-    addButton.setBounds(topRow.removeFromLeft(140));
-    topRow.removeFromLeft(8);
-    savePresetButton.setBounds(topRow.removeFromLeft(120));
-    topRow.removeFromLeft(8);
-    loadPresetButton.setBounds(topRow.removeFromLeft(120));
-
-    area.removeFromTop(8);
-
-    auto sceneRow = area.removeFromTop(34);
-    sceneSelector.setBounds(sceneRow.removeFromLeft(220));
-    sceneRow.removeFromLeft(8);
-    captureSceneButton.setBounds(sceneRow.removeFromLeft(120));
-    sceneRow.removeFromLeft(6);
-    updateSceneButton.setBounds(sceneRow.removeFromLeft(110));
-    sceneRow.removeFromLeft(6);
-    deleteSceneButton.setBounds(sceneRow.removeFromLeft(110));
-    sceneRow.removeFromLeft(6);
-    prevSceneButton.setBounds(sceneRow.removeFromLeft(80));
-    sceneRow.removeFromLeft(6);
-    nextSceneButton.setBounds(sceneRow.removeFromLeft(80));
-
-    area.removeFromTop(10);
-
-    // Live-control row (bottom-most).
-    auto controlRow = area.removeFromBottom(32);
-    learnBypassButton.setBounds(controlRow.removeFromLeft(120));
-    controlRow.removeFromLeft(6);
-    learnExprButton.setBounds(controlRow.removeFromLeft(140));
-    controlRow.removeFromLeft(6);
-    learnSceneNextButton.setBounds(controlRow.removeFromLeft(120));
-    controlRow.removeFromLeft(6);
-    learnScenePrevButton.setBounds(controlRow.removeFromLeft(120));
-    controlRow.removeFromLeft(6);
-    clearMapsButton.setBounds(controlRow.removeFromLeft(100));
-    controlRow.removeFromLeft(10);
-    controlLabel.setBounds(controlRow);
-    area.removeFromBottom(8);
-
-    // Chain action buttons live in a row at the bottom.
-    auto bottomRow = area.removeFromBottom(36);
-    for (auto* b : { &editorButton, &bypassButton, &removeButton, &downButton, &upButton })
+    // ── Header bar (title + live metrics) ─────────────────────────────────────
+    headerPanel = area.removeFromTop(52);
     {
-        b->setBounds(bottomRow.removeFromRight(120));
-        bottomRow.removeFromRight(8);
+        auto h = headerPanel.reduced(16, 0);
+        metricsLabel.setBounds(h.removeFromRight(340));
+        titleLabel.setBounds(h);
+    }
+    area.removeFromTop(gap);
+
+    // ── Toolbar ───────────────────────────────────────────────────────────────
+    auto toolbar = area.removeFromTop(rowH);
+    audioSettingsButton.setBounds(toolbar.removeFromLeft(140));
+    toolbar.removeFromLeft(8);
+    scanButton.setBounds(toolbar.removeFromLeft(130));
+    area.removeFromTop(gap);
+
+    // ── Footer panel (scenes + control), pinned to the bottom ─────────────────
+    footerPanel = area.removeFromBottom(footerH);
+    {
+        auto f = footerPanel.reduced(14, 12);
+
+        auto sceneRow = f.removeFromTop(rowH);
+        sceneLabel.setBounds(sceneRow.removeFromLeft(70));
+        sceneSelector.setBounds(sceneRow.removeFromLeft(200));
+        sceneRow.removeFromLeft(10);
+        captureSceneButton.setBounds(sceneRow.removeFromLeft(92));
+        sceneRow.removeFromLeft(6);
+        updateSceneButton.setBounds(sceneRow.removeFromLeft(86));
+        sceneRow.removeFromLeft(6);
+        deleteSceneButton.setBounds(sceneRow.removeFromLeft(86));
+        nextSceneButton.setBounds(sceneRow.removeFromRight(72));
+        sceneRow.removeFromRight(6);
+        prevSceneButton.setBounds(sceneRow.removeFromRight(72));
+
+        f.removeFromTop(8);
+
+        auto controlRow = f.removeFromTop(rowH);
+        controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
+        learnBypassButton.setBounds(controlRow.removeFromLeft(108));
+        controlRow.removeFromLeft(6);
+        learnExprButton.setBounds(controlRow.removeFromLeft(126));
+        controlRow.removeFromLeft(6);
+        learnSceneNextButton.setBounds(controlRow.removeFromLeft(106));
+        controlRow.removeFromLeft(6);
+        learnScenePrevButton.setBounds(controlRow.removeFromLeft(106));
+        controlRow.removeFromLeft(6);
+        clearMapsButton.setBounds(controlRow.removeFromLeft(92));
+        controlRow.removeFromLeft(12);
+        controlLabel.setBounds(controlRow);
+    }
+    area.removeFromBottom(gap);
+
+    // ── Content: LIBRARY panel | SIGNAL CHAIN panel ───────────────────────────
+    auto content = area;
+    libraryPanel = content.removeFromLeft((content.getWidth() - gap) / 2);
+    content.removeFromLeft(gap);
+    chainPanel = content;
+
+    {
+        auto in = libraryPanel.reduced(12);
+        paletteLabel.setBounds(in.removeFromTop(20));
+        in.removeFromTop(6);
+        addButton.setBounds(in.removeFromBottom(rowH));
+        in.removeFromBottom(8);
+        paletteListBox.setBounds(in);
     }
 
-    area.removeFromBottom(8);
-
-    // Two columns: palette (left) and chain (right).
-    auto labelRow = area.removeFromTop(22);
-    paletteLabel.setBounds(labelRow.removeFromLeft(area.getWidth() / 2));
-    chainLabel.setBounds(labelRow);
-
-    auto columns = area;
-    auto left = columns.removeFromLeft(columns.getWidth() / 2);
-    left.removeFromRight(6);
-    columns.removeFromLeft(6);
-
-    paletteListBox.setBounds(left);
-    chainListBox.setBounds(columns);
+    {
+        auto in = chainPanel.reduced(12);
+        auto headRow = in.removeFromTop(28);
+        loadPresetButton.setBounds(headRow.removeFromRight(78));
+        headRow.removeFromRight(6);
+        savePresetButton.setBounds(headRow.removeFromRight(78));
+        chainLabel.setBounds(headRow.withTrimmedTop(4));
+        in.removeFromTop(6);
+        chainListBox.setBounds(in);
+    }
 }
 
 void MainComponent::buttonClicked(juce::Button* button)
@@ -190,11 +254,6 @@ void MainComponent::buttonClicked(juce::Button* button)
     }
 
     if (button == &addButton)    { addSelectedToChain();      return; }
-    if (button == &removeButton) { removeSelectedChainSlot(); return; }
-    if (button == &upButton)     { moveSelectedChainSlot(-1); return; }
-    if (button == &downButton)   { moveSelectedChainSlot(+1); return; }
-    if (button == &bypassButton) { toggleSelectedBypass();    return; }
-    if (button == &editorButton) { openSelectedEditor();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
     if (button == &captureSceneButton) { captureScene();      return; }
@@ -303,12 +362,7 @@ void MainComponent::executeAction(const ControlAction& action)
     switch (action.type)
     {
         case ControlAction::Type::toggleBypass:
-            if (juce::isPositiveAndBelow(action.index, pluginHost.getNumSlots()))
-            {
-                const auto infos = pluginHost.getSlotInfos();
-                pluginHost.setBypass(action.index, ! infos.getReference(action.index).bypassed);
-                refreshChainList();
-            }
+            toggleBypassAt(action.index);
             break;
 
         case ControlAction::Type::nextScene:  stepScene(+1);            break;
@@ -521,23 +575,14 @@ void MainComponent::refreshPaletteList()
 
 void MainComponent::refreshChainList()
 {
-    chainNames.clear();
+    const int selected = chainListBox.getSelectedRow();
 
-    const auto infos = pluginHost.getSlotInfos();
-
-    for (int i = 0; i < infos.size(); ++i)
-    {
-        const auto& info = infos.getReference(i);
-        juce::String label;
-        label << (i + 1) << ". " << info.name << " [" << info.format << "]";
-
-        if (info.bypassed)
-            label << "   (BYPASSED)";
-
-        chainNames.add(label);
-    }
-
+    chainModel.setInfos(pluginHost.getSlotInfos());
     chainListBox.updateContent();
+
+    if (juce::isPositiveAndBelow(selected, chainModel.getInfos().size()))
+        chainListBox.selectRow(selected, juce::dontSendNotification);
+
     chainListBox.repaint();
 }
 
@@ -572,9 +617,8 @@ void MainComponent::addSelectedToChain()
     }
 }
 
-void MainComponent::moveSelectedChainSlot(int delta)
+void MainComponent::moveSlotAt(int row, int delta)
 {
-    const auto row = getSelectedChainRow();
     const auto target = row + delta;
 
     if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots())
@@ -586,10 +630,8 @@ void MainComponent::moveSelectedChainSlot(int delta)
     chainListBox.selectRow(target);
 }
 
-void MainComponent::toggleSelectedBypass()
+void MainComponent::toggleBypassAt(int row)
 {
-    const auto row = getSelectedChainRow();
-
     if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
         return;
 
@@ -599,10 +641,8 @@ void MainComponent::toggleSelectedBypass()
     chainListBox.selectRow(row);
 }
 
-void MainComponent::removeSelectedChainSlot()
+void MainComponent::removeSlotAt(int row)
 {
-    const auto row = getSelectedChainRow();
-
     if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
         return;
 
@@ -611,13 +651,11 @@ void MainComponent::removeSelectedChainSlot()
     refreshChainList();
 }
 
-void MainComponent::openSelectedEditor()
+void MainComponent::openEditorAt(int row)
 {
-    const auto row = getSelectedChainRow();
-
     if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
     {
-        HostDebug::log("UI: Open editor — no chain selection");
+        HostDebug::log("UI: Open editor — invalid slot " + juce::String(row));
         return;
     }
 

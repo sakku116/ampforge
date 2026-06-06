@@ -7,6 +7,8 @@
 #include "PluginScanner.h"
 #include "ControlMap.h"
 #include "SceneManager.h"
+#include "ToneForgeLookAndFeel.h"
+#include "ChainListBox.h"
 
 class MainComponent : public juce::Component,
                       private juce::Button::Listener,
@@ -16,6 +18,7 @@ public:
     MainComponent();
     ~MainComponent() override;
 
+    void paint(juce::Graphics&) override;
     void resized() override;
 
 private:
@@ -26,7 +29,7 @@ private:
         AudioSettingsWindow(juce::AudioDeviceManager& manager,
                             std::function<void()> onClose)
             : juce::DocumentWindow("Audio Settings",
-                                   juce::Colours::darkgrey,
+                                   tf::colour::surface,
                                    juce::DocumentWindow::closeButton),
               onCloseCallback(std::move(onClose))
         {
@@ -53,7 +56,7 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsWindow)
     };
 
-    // ── Generic text list model (used for both palette and chain) ─────────────
+    // ── Plain text list model (palette / library) ─────────────────────────────
     class SimpleListModel : public juce::ListBoxModel
     {
     public:
@@ -64,12 +67,16 @@ private:
         void paintListBoxItem(int row, juce::Graphics& g, int width, int height, bool selected) override
         {
             if (selected)
-                g.fillAll(juce::Colours::lightblue.withAlpha(0.5f));
+            {
+                g.setColour(tf::colour::accent.withAlpha(0.16f));
+                g.fillRoundedRectangle(juce::Rectangle<int>(2, 1, width - 4, height - 2).toFloat(), 5.0f);
+            }
 
             if (juce::isPositiveAndBelow(row, rows.size()))
             {
-                g.setColour(juce::Colours::white);
-                g.drawText(rows[row], 6, 0, width - 12, height, juce::Justification::centredLeft);
+                g.setColour(selected ? tf::colour::text : tf::colour::text.withAlpha(0.92f));
+                g.setFont(juce::FontOptions(13.5f));
+                g.drawText(rows[row], 12, 0, width - 18, height, juce::Justification::centredLeft);
             }
         }
 
@@ -100,10 +107,12 @@ private:
     int  getSelectedPaletteRow() const;
     int  getSelectedChainRow() const;
     void addSelectedToChain();
-    void moveSelectedChainSlot(int delta);
-    void toggleSelectedBypass();
-    void removeSelectedChainSlot();
-    void openSelectedEditor();
+
+    // Per-slot chain actions (driven by the inline row buttons).
+    void toggleBypassAt(int row);
+    void moveSlotAt(int row, int delta);
+    void removeSlotAt(int row);
+    void openEditorAt(int row);
 
     void savePreset();
     void loadPreset();
@@ -133,6 +142,9 @@ private:
     void saveControlMap();
     void restoreControlMap();
 
+    // ── Theme (declared first so it outlives every child component) ────────────
+    ToneForgeLookAndFeel lookAndFeel;
+
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
     AudioEngine audioEngine;
@@ -141,39 +153,38 @@ private:
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
     juce::Label metricsLabel;
-    juce::Label paletteLabel { {}, "Scanned Plugins" };
-    juce::Label chainLabel   { {}, "Pedalboard Chain" };
+    juce::Label paletteLabel        { {}, "LIBRARY" };
+    juce::Label chainLabel          { {}, "SIGNAL CHAIN" };
+    juce::Label sceneLabel          { {}, "SCENES" };
+    juce::Label controlSectionLabel { {}, "CONTROL" };
 
     juce::TextButton audioSettingsButton { "Audio Settings" };
-    juce::TextButton scanButton          { "Scan VST3 Folders" };
-    juce::TextButton addButton           { "Add to Chain >" };
-    juce::TextButton removeButton        { "Remove" };
-    juce::TextButton upButton            { "Move Up" };
-    juce::TextButton downButton          { "Move Down" };
-    juce::TextButton bypassButton        { "Bypass" };
-    juce::TextButton editorButton        { "Open Editor" };
-    juce::TextButton savePresetButton    { "Save Preset" };
-    juce::TextButton loadPresetButton    { "Load Preset" };
-    juce::TextButton captureSceneButton  { "Capture Scene" };
-    juce::TextButton updateSceneButton   { "Update Scene" };
-    juce::TextButton deleteSceneButton   { "Delete Scene" };
+    juce::TextButton scanButton          { "Rescan VST3" };
+    juce::TextButton addButton           { "+ Add to Chain" };
+    juce::TextButton savePresetButton    { "Save" };
+    juce::TextButton loadPresetButton    { "Load" };
+    juce::TextButton captureSceneButton  { "Capture" };
+    juce::TextButton updateSceneButton   { "Update" };
+    juce::TextButton deleteSceneButton   { "Delete" };
     juce::TextButton prevSceneButton     { "< Prev" };
     juce::TextButton nextSceneButton     { "Next >" };
     juce::ComboBox   sceneSelector;
 
     juce::Label      controlLabel;
-    juce::TextButton learnBypassButton    { "Learn: Bypass" };
-    juce::TextButton learnExprButton      { "Learn: Expression" };
-    juce::TextButton learnSceneNextButton { "Learn: Scene+" };
-    juce::TextButton learnScenePrevButton { "Learn: Scene-" };
+    juce::TextButton learnBypassButton    { "Learn Bypass" };
+    juce::TextButton learnExprButton      { "Learn Expression" };
+    juce::TextButton learnSceneNextButton { "Learn Scene+" };
+    juce::TextButton learnScenePrevButton { "Learn Scene-" };
     juce::TextButton clearMapsButton      { "Clear Maps" };
 
     juce::StringArray paletteNames;
-    juce::StringArray chainNames;
     SimpleListModel paletteModel { paletteNames };
-    SimpleListModel chainModel   { chainNames };
+    ChainListModel  chainModel;
     juce::ListBox paletteListBox;
     juce::ListBox chainListBox;
+
+    // Panel backgrounds, computed in resized() and drawn in paint().
+    juce::Rectangle<int> headerPanel, libraryPanel, chainPanel, footerPanel;
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;

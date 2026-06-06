@@ -280,13 +280,18 @@ bool PluginChain::activateChain(int handle, int crossfadeMs)
     auto list = it->second;
     preloaded.erase(it);
 
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+
     if (crossfadeMs <= 0)
         publish(list);
     else
         publishWithCrossfade(list, crossfadeMs);
 
+    const double switchMs = juce::Time::getMillisecondCounterHiRes() - t0;
+
     HostDebug::log("Activated preloaded chain handle=" + juce::String(handle)
-                   + " (crossfade " + juce::String(crossfadeMs) + " ms)");
+                   + " (crossfade " + juce::String(crossfadeMs) + " ms)"
+                   + " | switch " + juce::String(switchMs, 3) + " ms (target <50)");
     return true;
 }
 

@@ -318,7 +318,7 @@ private:
     juce::Label metricsLabel;
     juce::Label paletteLabel        { {}, "LIBRARY" };
     juce::Label chainLabel          { {}, "SIGNAL CHAIN" };
-    juce::Label sceneLabel          { {}, "SCENES" };
+    juce::Label sceneLabel          { {}, "TEMPLATES" };
     juce::Label controlSectionLabel { {}, "CONTROL" };
 
     juce::TextButton audioSettingsButton { "Audio Settings" };
@@ -340,12 +340,19 @@ private:
     juce::TextButton addSectionStompButton  { "+ Stomp" };
     juce::TextButton addSectionPresetButton { "+ Preset" };
 
+    juce::Label      masterLabel          { {}, "MASTER" };
+    juce::Slider     inputGainSlider;
+    juce::Label      inputGainLabel       { {}, "In Gain" };
+    juce::TextButton inputGainResetButton;
+    juce::Slider     outputVolSlider;
+    juce::Label      outputVolLabel       { {}, "Out Vol" };
+    juce::TextButton outputVolResetButton;
+    juce::TextButton muteButton           { "MUTE" };
+
     juce::Label      controlLabel;
     juce::TextButton learnBypassButton       { "Learn Bypass" };
     juce::TextButton learnPresetSelectButton { "Learn Preset Sel" };
     juce::TextButton learnExprButton         { "Learn Expression" };
-    juce::TextButton learnSceneNextButton    { "Learn Scene+" };
-    juce::TextButton learnScenePrevButton    { "Learn Scene-" };
     juce::TextButton clearMapsButton         { "Clear Maps" };
 
     juce::StringArray paletteNames;

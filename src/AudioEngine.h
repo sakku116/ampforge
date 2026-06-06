@@ -30,6 +30,14 @@ public:
     /** Restores device manager state from previously saved XML. */
     void restoreDeviceState(const juce::XmlElement* savedState);
 
+    // ── Master control ────────────────────────────────────────────────────────
+    void  setMasterInputGain(float gain)  { masterInputGain.store(gain); }
+    void  setMasterOutputGain(float gain) { masterOutputGain.store(gain); }
+    void  setMasterMuted(bool muted)      { masterMuted.store(muted); }
+    float getMasterInputGain()  const     { return masterInputGain.load(); }
+    float getMasterOutputGain() const     { return masterOutputGain.load(); }
+    bool  isMasterMuted()       const     { return masterMuted.load(); }
+
     // ── Performance metrics (Phase 3) ─────────────────────────────────────────
     double getCpuUsagePercent() const { return deviceManager.getCpuUsage() * 100.0; }
     double getDspLoadPercent() const  { return dspLoad.load() * 100.0; }
@@ -58,6 +66,10 @@ private:
     juce::AudioBuffer<float> processingBuffer;
     juce::MidiBuffer midiBuffer;
     juce::MidiMessageCollector midiCollector;
+
+    std::atomic<float> masterInputGain  { 1.0f };
+    std::atomic<float> masterOutputGain { 1.0f };
+    std::atomic<bool>  masterMuted      { false };
 
     // metrics
     std::atomic<double> dspLoad { 0.0 };       // smoothed processAudio time / block time

@@ -32,6 +32,7 @@ public:
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);
+    void setSectionBypassed(int sectionId, bool shouldBypass) { chain.setSectionBypassed(sectionId, shouldBypass); }
     void renameSlot(int index, const juce::String& newName) { chain.renameSlot(index, newName); }
     void clearChain();
 

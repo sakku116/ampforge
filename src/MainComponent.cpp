@@ -26,7 +26,7 @@ MainComponent::MainComponent()
     addAndMakeVisible(metricsLabel);
 
     // Section headers: small, bold, accent-coloured.
-    for (auto* l : { &paletteLabel, &chainLabel, &sceneLabel, &controlSectionLabel })
+    for (auto* l : { &paletteLabel, &chainLabel, &sceneLabel, &controlSectionLabel, &masterLabel })
     {
         l->setFont(juce::FontOptions(12.5f, juce::Font::bold));
         l->setColour(juce::Label::textColourId, tf::colour::accent);
@@ -91,6 +91,12 @@ MainComponent::MainComponent()
     chainModel.onSectionMoveDown = [this](int id) { moveSectionDownAt(id); };
     chainModel.onSectionRemove   = [this](int id) { removeSectionAt(id); };
     chainModel.onSectionRename   = [this](int id) { renameSectionAt(id); };
+    chainModel.onSectionBypass   = [this](int id, bool bypassed)
+    {
+        pluginHost.setSectionBypassed(id, bypassed);
+        refreshChainList();
+        setSceneDirty(sceneManager.getCurrentIndex() >= 0);
+    };
 
     // Scene action buttons: icon text + tooltip so their purpose is clear at a glance.
     captureSceneButton.setButtonText(juce::String::fromUTF8("\xE2\x8A\x95"));   // ⊕
@@ -100,12 +106,12 @@ MainComponent::MainComponent()
     prevSceneButton   .setButtonText(juce::String::fromUTF8("\xE2\x97\x80"));   // ◀
     nextSceneButton   .setButtonText(juce::String::fromUTF8("\xE2\x96\xB6"));   // ▶
 
-    captureSceneButton.setTooltip("Capture — save current chain as a new scene");
-    updateSceneButton .setTooltip("Update — overwrite active scene with current chain");
-    renameSceneButton .setTooltip("Rename — change the name of the active scene");
-    deleteSceneButton .setTooltip("Delete — remove the active scene");
-    prevSceneButton   .setTooltip("Previous scene");
-    nextSceneButton   .setTooltip("Next scene");
+    captureSceneButton.setTooltip("Capture — save current chain as a new template");
+    updateSceneButton .setTooltip("Update — overwrite active template with current chain");
+    renameSceneButton .setTooltip("Rename — change the name of the active template");
+    deleteSceneButton .setTooltip("Delete — remove the active template");
+    prevSceneButton   .setTooltip("Previous template");
+    nextSceneButton   .setTooltip("Next template");
 
     for (auto* b : { &audioSettingsButton, &scanButton, &scanPathsButton, &addButton,
                      &savePresetButton, &loadPresetButton,
@@ -113,7 +119,7 @@ MainComponent::MainComponent()
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnBypassButton, &learnPresetSelectButton, &learnExprButton,
-                     &learnSceneNextButton, &learnScenePrevButton, &clearMapsButton })
+                     &clearMapsButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -127,7 +133,7 @@ MainComponent::MainComponent()
     deleteSceneButton .setColour(juce::TextButton::textColourOffId, tf::colour::danger);
     clearMapsButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
 
-    sceneSelector.setTextWhenNothingSelected("(no scenes)");
+    sceneSelector.setTextWhenNothingSelected("(no templates)");
     sceneSelector.onChange = [this]
     {
         const int idx = sceneSelector.getSelectedId() - 1;   // ids are index+1
@@ -147,6 +153,59 @@ MainComponent::MainComponent()
     sceneDirtyLabel.setJustificationType(juce::Justification::centredLeft);
     sceneDirtyLabel.setVisible(false);
     addAndMakeVisible(sceneDirtyLabel);
+
+    // Master control
+    for (auto* l : { &inputGainLabel, &outputVolLabel })
+    {
+        l->setFont(juce::FontOptions(12.5f));
+        l->setColour(juce::Label::textColourId, tf::colour::textDim);
+        l->setJustificationType(juce::Justification::centredRight);
+        addAndMakeVisible(*l);
+    }
+
+    auto setupSlider = [this](juce::Slider& s, float defaultVal, std::function<void()> onChange)
+    {
+        s.setSliderStyle(juce::Slider::LinearHorizontal);
+        s.setTextBoxStyle(juce::Slider::NoTextBox, true, 0, 0);
+        s.setRange(0.0, 2.0, 0.0);
+        s.setValue(defaultVal, juce::dontSendNotification);
+        s.onValueChange = std::move(onChange);
+        addAndMakeVisible(s);
+    };
+
+    setupSlider(inputGainSlider,  1.0f, [this] { audioEngine.setMasterInputGain((float) inputGainSlider.getValue()); });
+    setupSlider(outputVolSlider,  1.0f, [this] { audioEngine.setMasterOutputGain((float) outputVolSlider.getValue()); });
+
+    inputGainSlider.setTooltip("Master input gain (0 = silence, 1 = unity, 2 = +6 dB)");
+    outputVolSlider.setTooltip("Master output volume (0 = silence, 1 = unity, 2 = +6 dB)");
+
+    const juce::String kReset = juce::String::fromUTF8("\xE2\x86\xBA");   // ↺
+    inputGainResetButton.setButtonText(kReset);
+    outputVolResetButton.setButtonText(kReset);
+    inputGainResetButton.setTooltip("Reset input gain to unity (1.0)");
+    outputVolResetButton.setTooltip("Reset output volume to unity (1.0)");
+    inputGainResetButton.onClick = [this]
+    {
+        inputGainSlider.setValue(1.0, juce::sendNotification);
+    };
+    outputVolResetButton.onClick = [this]
+    {
+        outputVolSlider.setValue(1.0, juce::sendNotification);
+    };
+    addAndMakeVisible(inputGainResetButton);
+    addAndMakeVisible(outputVolResetButton);
+
+    muteButton.setTooltip("Mute / unmute master output");
+    muteButton.onClick = [this]
+    {
+        const bool nowMuted = ! audioEngine.isMasterMuted();
+        audioEngine.setMasterMuted(nowMuted);
+        muteButton.setColour(juce::TextButton::buttonColourId,
+                             nowMuted ? tf::colour::danger : juce::Colour{});
+        muteButton.setColour(juce::TextButton::textColourOffId,
+                             nowMuted ? juce::Colours::white : tf::colour::text);
+    };
+    addAndMakeVisible(muteButton);
 
     audioEngine.start();
     tryRestoreAudioDeviceState();
@@ -198,7 +257,7 @@ MainComponent::~MainComponent()
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnBypassButton, &learnPresetSelectButton, &learnExprButton,
-                     &learnSceneNextButton, &learnScenePrevButton, &clearMapsButton })
+                     &clearMapsButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
@@ -244,7 +303,7 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    const int pad = 14, gap = 10, rowH = 34, footerH = 100;
+    const int pad = 14, gap = 10, rowH = 34, footerH = 140;
     auto area = getLocalBounds().reduced(pad);
 
     // ── Header bar (title + live metrics) ─────────────────────────────────────
@@ -270,24 +329,36 @@ void MainComponent::resized()
     {
         auto f = footerPanel.reduced(14, 12);
 
+        // Templates row: [TEMPLATES] [Dropdown] [◀ ▶] [⊕ ↑ ✎ ✕] [● modified — right]
         auto sceneRow = f.removeFromTop(rowH);
-        sceneLabel.setBounds(sceneRow.removeFromLeft(70));
+        sceneLabel   .setBounds(sceneRow.removeFromLeft(70));
         sceneSelector.setBounds(sceneRow.removeFromLeft(200));
         sceneRow.removeFromLeft(8);
-        sceneDirtyLabel.setBounds(sceneRow.removeFromLeft(88));
-        sceneRow.removeFromLeft(6);
-
-        // Icon buttons: ⊕ capture  ↑ update  ✎ rename  ✕ delete  |  ◀ prev  ▶ next
+        prevSceneButton.setBounds(sceneRow.removeFromLeft(34));
+        sceneRow.removeFromLeft(4);
+        nextSceneButton.setBounds(sceneRow.removeFromLeft(34));
+        sceneRow.removeFromLeft(8);
         for (auto* b : { &captureSceneButton, &updateSceneButton,
                          &renameSceneButton,  &deleteSceneButton })
         {
             b->setBounds(sceneRow.removeFromLeft(34));
             sceneRow.removeFromLeft(4);
         }
+        sceneDirtyLabel.setBounds(sceneRow.removeFromLeft(88));
 
-        nextSceneButton.setBounds(sceneRow.removeFromRight(34));
-        sceneRow.removeFromRight(4);
-        prevSceneButton.setBounds(sceneRow.removeFromRight(34));
+        f.removeFromTop(8);
+
+        auto masterRow = f.removeFromTop(rowH);
+        masterLabel         .setBounds(masterRow.removeFromLeft(70));
+        inputGainLabel      .setBounds(masterRow.removeFromLeft(50));
+        inputGainSlider     .setBounds(masterRow.removeFromLeft(110));
+        inputGainResetButton.setBounds(masterRow.removeFromLeft(24));
+        masterRow.removeFromLeft(8);
+        outputVolLabel      .setBounds(masterRow.removeFromLeft(50));
+        outputVolSlider     .setBounds(masterRow.removeFromLeft(110));
+        outputVolResetButton.setBounds(masterRow.removeFromLeft(24));
+        masterRow.removeFromLeft(8);
+        muteButton          .setBounds(masterRow.removeFromLeft(60));
 
         f.removeFromTop(8);
 
@@ -296,8 +367,6 @@ void MainComponent::resized()
         learnBypassButton       .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
         learnPresetSelectButton .setBounds(controlRow.removeFromLeft(120)); controlRow.removeFromLeft(5);
         learnExprButton         .setBounds(controlRow.removeFromLeft(120)); controlRow.removeFromLeft(5);
-        learnSceneNextButton    .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
-        learnScenePrevButton    .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
         clearMapsButton         .setBounds(controlRow.removeFromLeft(88));  controlRow.removeFromLeft(10);
         controlLabel.setBounds(controlRow);
     }
@@ -305,7 +374,7 @@ void MainComponent::resized()
 
     // ── Content: LIBRARY panel | SIGNAL CHAIN panel ───────────────────────────
     auto content = area;
-    libraryPanel = content.removeFromLeft((content.getWidth() - gap) / 2);
+    libraryPanel = content.removeFromLeft((content.getWidth() - gap) / 3);
     content.removeFromLeft(gap);
     chainPanel = content;
 
@@ -382,8 +451,6 @@ void MainComponent::buttonClicked(juce::Button* button)
         armExpressionLearn(rowToSlotIndex(juce::jmax(0, getSelectedChainRow())), 0);
         return;
     }
-    if (button == &learnSceneNextButton) { armActionLearn({ ControlAction::Type::nextScene, 0 }); return; }
-    if (button == &learnScenePrevButton) { armActionLearn({ ControlAction::Type::prevScene, 0 }); return; }
     if (button == &clearMapsButton)    { clearMappings();     return; }
 }
 
@@ -808,8 +875,9 @@ void MainComponent::refreshChainList()
         header.sectionId     = sec.id;
         header.sectionName   = sec.name;
         header.sectionType   = sec.type;
-        header.isFirstSection = (si == 0);
-        header.isLastSection  = (si == lastSecIdx);
+        header.isFirstSection  = (si == 0);
+        header.isLastSection   = (si == lastSecIdx);
+        header.sectionBypassed = sec.bypassed;
         rows.add(header);
 
         // Collect slot indices belonging to this section (preserving flat-list order).

@@ -102,10 +102,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     processingBuffer.setSize(channelsToUse, numSamples, false, false, true);
     processingBuffer.clear();
 
+    const float inGain = masterInputGain.load();
     for (int ch = 0; ch < channelsToUse; ++ch)
     {
         if (ch < numInputChannels && inputChannelData[ch] != nullptr)
+        {
             processingBuffer.copyFrom(ch, 0, inputChannelData[ch], numSamples);
+            if (inGain != 1.0f)
+                processingBuffer.applyGain(ch, 0, numSamples, inGain);
+        }
     }
 
     midiBuffer.clear();
@@ -124,10 +129,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         dspLoad.store(prev + 0.1 * (load - prev));   // exponential smoothing
     }
 
+    const float outGain = masterMuted.load() ? 0.0f : masterOutputGain.load();
     for (int ch = 0; ch < numOutputChannels; ++ch)
     {
         if (outputChannelData[ch] != nullptr)
+        {
             juce::FloatVectorOperations::copy(outputChannelData[ch], processingBuffer.getReadPointer(ch), numSamples);
+            if (outGain != 1.0f)
+                juce::FloatVectorOperations::multiply(outputChannelData[ch], outGain, numSamples);
+        }
     }
 }
 

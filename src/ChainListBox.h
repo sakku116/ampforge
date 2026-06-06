@@ -13,8 +13,9 @@ struct ChainRow
     int          sectionId   = 0;
     juce::String sectionName;
     PluginChain::SectionDef::Type sectionType = PluginChain::SectionDef::Type::stomp;
-    bool isFirstSection = false;
-    bool isLastSection  = false;
+    bool isFirstSection  = false;
+    bool isLastSection   = false;
+    bool sectionBypassed = false;
 
     // Slot fields (used when kind == slot):
     PluginChain::SlotInfo slotInfo;
@@ -40,10 +41,11 @@ public:
     std::function<void(int)> onResetName;
 
     // Section-action callbacks (receive sectionId):
-    std::function<void(int)> onSectionMoveUp;
-    std::function<void(int)> onSectionMoveDown;
-    std::function<void(int)> onSectionRemove;
-    std::function<void(int)> onSectionRename;
+    std::function<void(int)>       onSectionMoveUp;
+    std::function<void(int)>       onSectionMoveDown;
+    std::function<void(int)>       onSectionRemove;
+    std::function<void(int)>       onSectionRename;
+    std::function<void(int, bool)> onSectionBypass;
 
     void setRows(juce::Array<ChainRow> newRows) { rows = std::move(newRows); }
     const juce::Array<ChainRow>& getRows() const { return rows; }
@@ -81,13 +83,14 @@ private:
 
     int  rowIndex   = -1;
     int  sectionId  = 0;
-    bool isFirst    = false;
-    bool isLast     = false;
-    bool selected   = false;
+    bool isFirst         = false;
+    bool isLast          = false;
+    bool selected        = false;
+    bool sectionBypassed = false;
     juce::String sectionName;
     PluginChain::SectionDef::Type sectionType = PluginChain::SectionDef::Type::stomp;
 
-    juce::TextButton upButton, downButton, removeButton;
+    juce::TextButton upButton, downButton, removeButton, bypassButton;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SectionHeaderComponent)
 };

@@ -22,9 +22,10 @@ public:
     struct SectionDef
     {
         enum class Type { stomp, preset };
-        int          id   = 0;
+        int          id       = 0;
         juce::String name;
-        Type         type = Type::stomp;
+        Type         type     = Type::stomp;
+        bool         bypassed = false;
     };
 
     struct SlotInfo
@@ -56,6 +57,8 @@ public:
     void renameSection(int sectionId, const juce::String& name);
     void moveSectionUp(int sectionId);
     void moveSectionDown(int sectionId);
+    void setSectionBypassed(int sectionId, bool shouldBypass);
+    bool isSectionBypassed(int sectionId) const;
     juce::Array<SectionDef> getSectionDefs() const;
     int  getDefaultSectionId() const;
     juce::Array<SectionDef> captureSectionDefs() const;
@@ -114,7 +117,8 @@ private:
     struct Slot
     {
         std::unique_ptr<juce::AudioPluginInstance> instance;
-        std::atomic<bool> bypassed { false };
+        std::atomic<bool> bypassed        { false };
+        std::atomic<bool> sectionBypassed { false };
         juce::PluginDescription description;
         juce::String customName;   // empty = use instance->getName(). Message-thread only.
         int sectionId = 1;         // message-thread only

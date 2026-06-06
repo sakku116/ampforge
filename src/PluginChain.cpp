@@ -104,7 +104,7 @@ void PluginChain::runList(const SlotList& list, juce::AudioBuffer<float>& buffer
 {
     for (const auto& slot : list)
     {
-        if (slot->bypassed.load())
+        if (slot->bypassed.load() || slot->sectionBypassed.load())
             continue;
 
         slot->instance->processBlock(buffer, midi);
@@ -182,14 +182,20 @@ bool PluginChain::addPlugin(const juce::PluginDescription& description, int targ
             }
         }
 
-        // Preset section: new slot must start bypassed if there is already an active slot,
-        // so the exclusive-one-active invariant holds from the moment it is inserted.
-        if (secIdx >= 0 && sectionDefs[(size_t) secIdx].type == SectionDef::Type::preset)
+        if (secIdx >= 0)
         {
-            const bool sectionHasSlots = std::any_of(next->begin(), next->end(),
-                [targetSectionId](const auto& s) { return s->sectionId == targetSectionId; });
-            if (sectionHasSlots)
-                slot->bypassed.store(true);
+            // Propagate section-level bypass to the new slot.
+            slot->sectionBypassed.store(sectionDefs[(size_t) secIdx].bypassed);
+
+            // Preset section: new slot must start bypassed if there is already an active slot,
+            // so the exclusive-one-active invariant holds from the moment it is inserted.
+            if (sectionDefs[(size_t) secIdx].type == SectionDef::Type::preset)
+            {
+                const bool sectionHasSlots = std::any_of(next->begin(), next->end(),
+                    [targetSectionId](const auto& s) { return s->sectionId == targetSectionId; });
+                if (sectionHasSlots)
+                    slot->bypassed.store(true);
+            }
         }
 
         next->insert(next->begin() + insertPos, std::move(slot));
@@ -374,6 +380,27 @@ void PluginChain::moveSectionDown(int sectionId)
     HostDebug::log("Section move down: id=" + juce::String(sectionId));
 }
 
+void PluginChain::setSectionBypassed(int sectionId, bool shouldBypass)
+{
+    for (auto& def : sectionDefs)
+        if (def.id == sectionId) { def.bypassed = shouldBypass; break; }
+
+    // Atomically update every slot in this section — no republish needed.
+    auto cur = currentList();
+    for (const auto& slot : *cur)
+        if (slot->sectionId == sectionId)
+            slot->sectionBypassed.store(shouldBypass);
+
+    HostDebug::log("Section " + juce::String(sectionId) + " bypassed=" + juce::String((int) shouldBypass));
+}
+
+bool PluginChain::isSectionBypassed(int sectionId) const
+{
+    for (const auto& def : sectionDefs)
+        if (def.id == sectionId) return def.bypassed;
+    return false;
+}
+
 juce::Array<PluginChain::SectionDef> PluginChain::getSectionDefs() const
 {
     juce::Array<SectionDef> result;
@@ -442,7 +469,14 @@ std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<
         // Validate sectionId; fall back to first section if unknown.
         bool validSec = false;
         for (const auto& def : sectionDefs)
-            if (def.id == spec.sectionId) { validSec = true; break; }
+        {
+            if (def.id == spec.sectionId)
+            {
+                validSec = true;
+                slot->sectionBypassed.store(def.bypassed);
+                break;
+            }
+        }
         slot->sectionId = validSec ? spec.sectionId : (sectionDefs.empty() ? 1 : sectionDefs[0].id);
 
         list->push_back(std::move(slot));

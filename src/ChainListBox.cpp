@@ -3,9 +3,14 @@
 
 namespace
 {
-    const juce::String kUp     = juce::String::fromUTF8("\xE2\x96\xB2");   // ▲
-    const juce::String kDown   = juce::String::fromUTF8("\xE2\x96\xBC");   // ▼
-    const juce::String kRemove = juce::String::fromUTF8("\xE2\x9C\x95");   // ✕
+    const juce::String kUp             = juce::String::fromUTF8("\xE2\x96\xB2");   // ▲
+    const juce::String kDown           = juce::String::fromUTF8("\xE2\x96\xBC");   // ▼
+    const juce::String kRemove         = juce::String::fromUTF8("\xE2\x9C\x95");   // ✕
+    const juce::String kBypass         = juce::String::fromUTF8("\xE2\x8A\x98");   // ⊘
+    const juce::String kSlotActive     = juce::String::fromUTF8("\xE2\x97\x8F");   // ●
+    const juce::String kPresetActive   = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶
+    const juce::String kPresetInactive = juce::String::fromUTF8("\xE2\x97\x8B");   // ○
+    const juce::String kEditor         = juce::String::fromUTF8("\xE2\x9A\x99");   // ⚙
 }
 
 // ── Model: refreshComponentForRow ─────────────────────────────────────────────
@@ -48,13 +53,22 @@ SectionHeaderComponent::SectionHeaderComponent(ChainListModel& ownerModel) : mod
         addAndMakeVisible(b);
     };
 
-    styleIcon(upButton,     kUp,    tf::colour::textDim);
-    styleIcon(downButton,   kDown,  tf::colour::textDim);
+    styleIcon(upButton,     kUp,     tf::colour::textDim);
+    styleIcon(downButton,   kDown,   tf::colour::textDim);
     styleIcon(removeButton, kRemove, tf::colour::danger);
+    styleIcon(bypassButton, kBypass, tf::colour::textDim);
 
     upButton.onClick     = [this] { if (model.onSectionMoveUp)   model.onSectionMoveUp(sectionId);   };
     downButton.onClick   = [this] { if (model.onSectionMoveDown) model.onSectionMoveDown(sectionId); };
     removeButton.onClick = [this] { if (model.onSectionRemove)   model.onSectionRemove(sectionId);   };
+    bypassButton.onClick = [this]
+    {
+        sectionBypassed = ! sectionBypassed;
+        bypassButton.setColour(juce::TextButton::buttonColourId,
+                               sectionBypassed ? tf::colour::warn.withAlpha(0.28f) : juce::Colour{});
+        if (model.onSectionBypass)
+            model.onSectionBypass(sectionId, sectionBypassed);
+    };
 }
 
 void SectionHeaderComponent::update(int rowIdx, const ChainRow& row, bool isRowSelected)
@@ -67,6 +81,10 @@ void SectionHeaderComponent::update(int rowIdx, const ChainRow& row, bool isRowS
     isLast      = row.isLastSection;
     selected    = isRowSelected;
 
+    sectionBypassed = row.sectionBypassed;
+    bypassButton.setColour(juce::TextButton::buttonColourId,
+                           sectionBypassed ? tf::colour::warn.withAlpha(0.28f) : juce::Colour{});
+
     upButton.setEnabled(! isFirst);
     downButton.setEnabled(! isLast);
     repaint();
@@ -77,7 +95,8 @@ void SectionHeaderComponent::resized()
     auto area = getLocalBounds().reduced(4, 3);
     removeButton.setBounds(area.removeFromRight(26));   area.removeFromRight(3);
     downButton  .setBounds(area.removeFromRight(26));   area.removeFromRight(2);
-    upButton    .setBounds(area.removeFromRight(26));
+    upButton    .setBounds(area.removeFromRight(26));   area.removeFromRight(6);
+    bypassButton.setBounds(area.removeFromRight(26));
 }
 
 void SectionHeaderComponent::paint(juce::Graphics& g)
@@ -117,7 +136,7 @@ void SectionHeaderComponent::paint(juce::Graphics& g)
 
     // Section name.
     auto nameArea = getLocalBounds().reduced(4 + (int) badgeW + 16, 0);
-    nameArea.removeFromRight(26 * 3 + 3 + 2 + 6);   // reserve space for buttons
+    nameArea.removeFromRight(26 * 4 + 3 + 2 + 6 + 6);   // reserve space for 4 buttons
     g.setColour(tf::colour::text);
     g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
     g.drawText(sectionName, nameArea, juce::Justification::centredLeft);
@@ -157,8 +176,8 @@ ChainSlotComponent::ChainSlotComponent(ChainListModel& ownerModel) : model(owner
         addAndMakeVisible(b);
     };
 
-    styleIcon(bypassButton,  "BYP",   tf::colour::text);
-    styleIcon(editorButton,  "EDIT",  tf::colour::accent);
+    styleIcon(bypassButton,  kBypass, tf::colour::text);
+    styleIcon(editorButton,  kEditor, tf::colour::accent);
     styleIcon(removeButton,  kRemove, tf::colour::danger);
 
     bypassButton.onClick = [this] { if (model.onBypass) model.onBypass(slotIndex); };
@@ -184,14 +203,19 @@ void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
 
     if (isPreset)
     {
-        bypassButton.setButtonText(bypassed ? "SEL" : "ACT");
+        bypassButton.setButtonText(bypassed ? kPresetInactive : kPresetActive);
+        bypassButton.setColour(juce::TextButton::buttonColourId,
+                               bypassed ? juce::Colour{} : tf::colour::accent.withAlpha(0.28f));
         bypassButton.setColour(juce::TextButton::textColourOffId,
                                bypassed ? tf::colour::textDim : tf::colour::accent);
     }
     else
     {
-        bypassButton.setButtonText(bypassed ? "BYP" : "ON");
-        bypassButton.setColour(juce::TextButton::textColourOffId, tf::colour::textDim);
+        bypassButton.setButtonText(bypassed ? kBypass : kSlotActive);
+        bypassButton.setColour(juce::TextButton::buttonColourId,
+                               bypassed ? tf::colour::warn.withAlpha(0.28f) : juce::Colour{});
+        bypassButton.setColour(juce::TextButton::textColourOffId,
+                               bypassed ? tf::colour::warn : tf::colour::text);
     }
 
     repaint();
@@ -203,8 +227,8 @@ void ChainSlotComponent::resized()
 
     const int gap = 4;
     removeButton.setBounds(area.removeFromRight(30));  area.removeFromRight(gap);
-    editorButton.setBounds(area.removeFromRight(48));  area.removeFromRight(gap);
-    bypassButton.setBounds(area.removeFromRight(44));  area.removeFromRight(gap);
+    editorButton.setBounds(area.removeFromRight(34));  area.removeFromRight(gap);
+    bypassButton.setBounds(area.removeFromRight(34));  area.removeFromRight(gap);
 
     gripArea = area.removeFromLeft(18);
     textArea = area;

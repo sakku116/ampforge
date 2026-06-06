@@ -3,6 +3,7 @@
 #include "PluginScanGuard.h"
 
 #include <algorithm>
+#include <cmath>
 
 PluginChain::PluginChain(juce::AudioPluginFormatManager& manager) : formatManager(manager)
 {
@@ -71,12 +72,42 @@ void PluginChain::publish(std::shared_ptr<SlotList> next)
 {
     processingChannelCount.store(computeChannelCount(*next));
 
+    fadeInList.store(nullptr);   // cancel any in-progress crossfade
+
     auto old = activeList.exchange(next);
 
     if (old != nullptr)
         retired.push_back(std::move(old));
 
     reclaimRetired();
+}
+
+void PluginChain::publishWithCrossfade(std::shared_ptr<SlotList> next, int crossfadeMs)
+{
+    processingChannelCount.store(juce::jmax(computeChannelCount(*currentList()),
+                                           computeChannelCount(*next)));
+
+    const int fadeSamples = juce::jmax(1, (int) (crossfadeMs * 0.001 * currentSampleRate));
+
+    // Keep the outgoing list referenced so it is reclaimed on the message thread, not on audio.
+    retired.push_back(activeList.load());
+
+    requestedFadeSamples.store(fadeSamples);
+    transitionEpoch.fetch_add(1);
+    fadeInList.store(next);       // audio thread promotes this to active when the fade completes
+
+    reclaimRetired();
+}
+
+void PluginChain::runList(const SlotList& list, juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    for (const auto& slot : list)
+    {
+        if (slot->bypassed.load())
+            continue;
+
+        slot->instance->processBlock(buffer, midi);
+    }
 }
 
 void PluginChain::reclaimRetired()
@@ -161,10 +192,10 @@ void PluginChain::clear()
     publish(std::make_shared<SlotList>());
 }
 
-bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
+std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<SlotSpec>& specs, bool& allOk)
 {
-    auto next = std::make_shared<SlotList>();
-    bool allOk = true;
+    auto list = std::make_shared<SlotList>();
+    allOk = true;
 
     for (const auto& spec : specs)
     {
@@ -173,7 +204,7 @@ bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
 
         if (slot == nullptr)
         {
-            HostDebug::log("Chain rebuild: slot FAILED " + spec.description.name + " — " + error);
+            HostDebug::log("Chain build: slot FAILED " + spec.description.name + " — " + error);
             allOk = false;
             continue;
         }
@@ -182,8 +213,16 @@ bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
             slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
 
         slot->bypassed.store(spec.bypassed);
-        next->push_back(std::move(slot));
+        list->push_back(std::move(slot));
     }
+
+    return list;
+}
+
+bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
+{
+    bool allOk = false;
+    auto next = buildList(specs, allOk);
 
     {
         const juce::ScopedLock sl(editLock);
@@ -191,6 +230,25 @@ bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
     }
 
     HostDebug::log("Chain rebuilt: " + juce::String((int) next->size()) + " slot(s), allOk=" + juce::String((int) allOk));
+    return allOk;
+}
+
+bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs)
+{
+    bool allOk = false;
+    auto next = buildList(specs, allOk);   // built outside the lock
+
+    {
+        const juce::ScopedLock sl(editLock);
+
+        if (crossfadeMs <= 0)
+            publish(next);
+        else
+            publishWithCrossfade(next, crossfadeMs);
+    }
+
+    HostDebug::log("Chain switch (crossfade " + juce::String(crossfadeMs) + " ms): "
+                   + juce::String((int) next->size()) + " slot(s)");
     return allOk;
 }
 
@@ -270,18 +328,63 @@ void PluginChain::prepare(double sampleRate, int blockSize, int inputChannels, i
     for (const auto& slot : *cur)
         prepareSlot(*slot);
 
+    if (auto in = fadeInList.load())   // a crossfade target, if mid-transition
+        for (const auto& slot : *in)
+            prepareSlot(*slot);
+
     processingChannelCount.store(computeChannelCount(*cur));
 }
 
 void PluginChain::processAudio(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    auto list = activeList.load();   // lock-free: copy the shared_ptr, keep the list alive for this block
+    auto in  = fadeInList.load();
+    auto act = activeList.load();   // lock-free: copy shared_ptrs, keep lists alive for this block
 
-    for (const auto& slot : *list)
+    if (in == nullptr)
     {
-        if (slot->bypassed.load())
-            continue;   // bypassed slot: audio passes through untouched
+        runList(*act, buffer, midiMessages);   // steady state
+        return;
+    }
 
-        slot->instance->processBlock(buffer, midiMessages);
+    // ── Crossfade: run the outgoing (act) and incoming (in) chains in parallel ──
+    const auto epoch = transitionEpoch.load();
+
+    if (epoch != lastTransitionEpoch)
+    {
+        lastTransitionEpoch = epoch;
+        crossfadePos = 0;
+        crossfadeTotal = juce::jmax(1, requestedFadeSamples.load());
+    }
+
+    const int numCh = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    fadeScratch.setSize(numCh, numSamples, false, false, true);
+
+    for (int ch = 0; ch < numCh; ++ch)
+        fadeScratch.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+
+    juce::MidiBuffer midiForOutgoing(midiMessages);
+
+    runList(*act, fadeScratch, midiForOutgoing);   // outgoing -> scratch
+    runList(*in,  buffer,      midiMessages);       // incoming -> buffer
+
+    // Equal-power mix: out = scratch*cos(g) + buffer*sin(g), g ramps 0 -> pi/2.
+    for (int s = 0; s < numSamples; ++s)
+    {
+        const float t = juce::jlimit(0.0f, 1.0f, (float) (crossfadePos + s) / (float) crossfadeTotal);
+        const float gOut = std::cos(t * juce::MathConstants<float>::halfPi);
+        const float gIn  = std::sin(t * juce::MathConstants<float>::halfPi);
+
+        for (int ch = 0; ch < numCh; ++ch)
+            buffer.setSample(ch, s, fadeScratch.getSample(ch, s) * gOut + buffer.getSample(ch, s) * gIn);
+    }
+
+    crossfadePos += numSamples;
+
+    if (crossfadePos >= crossfadeTotal)
+    {
+        activeList.store(in);          // promote incoming to active (atomic, no deletion here)
+        fadeInList.store(nullptr);     // transition complete
     }
 }

@@ -27,6 +27,8 @@ public:
 
     /** Rebuilds the whole chain from preset/scene specs (closes editors first). */
     bool rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs);
+    /** Crossfade-switches the chain to a new preset/scene (closes editors first). */
+    bool switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs);
     juce::Array<PluginChain::SlotSpec> captureChain() const { return chain.captureSpecs(); }
 
     // ── Editor ───────────────────────────────────────────────────────────────

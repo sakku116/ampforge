@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <vector>
 
@@ -42,6 +43,11 @@ public:
     void clear();
     bool rebuildFrom(const juce::Array<SlotSpec>& specs);
 
+    // ── Live switching (Phase 3) ─────────────────────────────────────────────
+    /** Builds a new chain and crossfades into it over crossfadeMs (0 = instant). */
+    bool switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs);
+    bool isTransitioning() const { return fadeInList.load() != nullptr; }
+
     // ── Queries (message thread) ─────────────────────────────────────────────
     int getNumSlots() const;
     juce::Array<SlotInfo> getSlotInfos() const;
@@ -68,17 +74,30 @@ private:
 
     std::shared_ptr<Slot> createSlot(const juce::PluginDescription& description, juce::String& error);
     void prepareSlot(Slot& slot);
+    std::shared_ptr<SlotList> buildList(const juce::Array<SlotSpec>& specs, bool& allOk);
 
     std::shared_ptr<SlotList> currentList() const { return activeList.load(); }
-    void publish(std::shared_ptr<SlotList> next);   // call under editLock
-    void reclaimRetired();                          // call under editLock
+    void publish(std::shared_ptr<SlotList> next);                          // call under editLock
+    void publishWithCrossfade(std::shared_ptr<SlotList> next, int ms);     // call under editLock
+    void reclaimRetired();                                                 // call under editLock
     static int computeChannelCount(const SlotList& list);
+    static void runList(const SlotList& list, juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
 
     juce::AudioPluginFormatManager& formatManager;
 
     std::atomic<std::shared_ptr<SlotList>> activeList { std::make_shared<SlotList>() };
+    std::atomic<std::shared_ptr<SlotList>> fadeInList { nullptr };   // incoming chain during a crossfade
     std::vector<std::shared_ptr<SlotList>> retired;   // message-thread graveyard for old lists
     juce::CriticalSection editLock;                   // serialises message-thread edits ONLY
+
+    std::atomic<int> requestedFadeSamples { 0 };
+    std::atomic<juce::uint32> transitionEpoch { 0 };
+
+    // audio-thread only:
+    juce::AudioBuffer<float> fadeScratch;
+    int crossfadePos = 0;
+    int crossfadeTotal = 0;
+    juce::uint32 lastTransitionEpoch = 0;
 
     double currentSampleRate    = 44100.0;
     int    currentBlockSize     = 512;

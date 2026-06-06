@@ -82,6 +82,12 @@ bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs)
     return chain.rebuildFrom(specs);
 }
 
+bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs)
+{
+    closeAllEditors();
+    return chain.switchWithCrossfade(specs, crossfadeMs);
+}
+
 // ── Editor ─────────────────────────────────────────────────────────────────
 void PluginHost::openEditorWindow(int index)
 {

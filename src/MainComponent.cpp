@@ -307,7 +307,7 @@ void MainComponent::loadPresetFile(const juce::File& file)
     if (! Preset::loadFromFile(file, specs))
         return;
 
-    pluginHost.rebuildChain(specs);
+    pluginHost.switchChainWithCrossfade(specs, 25);   // smooth, click-free preset switch
     refreshChainList();
     saveLastPresetPath(file);
     HostDebug::log("Preset applied: " + file.getFileName());

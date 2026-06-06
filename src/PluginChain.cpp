@@ -252,6 +252,50 @@ bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int cr
     return allOk;
 }
 
+int PluginChain::preloadChain(const juce::Array<SlotSpec>& specs)
+{
+    bool allOk = false;
+    auto list = buildList(specs, allOk);   // built outside the lock
+
+    const juce::ScopedLock sl(editLock);
+    const int handle = nextPreloadHandle++;
+    preloaded[handle] = list;
+    HostDebug::log("Preloaded chain handle=" + juce::String(handle)
+                   + " (" + juce::String((int) list->size()) + " slots, allOk=" + juce::String((int) allOk) + ")");
+    return handle;
+}
+
+bool PluginChain::activateChain(int handle, int crossfadeMs)
+{
+    const juce::ScopedLock sl(editLock);
+
+    auto it = preloaded.find(handle);
+
+    if (it == preloaded.end())
+    {
+        HostDebug::log("activateChain: unknown handle " + juce::String(handle));
+        return false;
+    }
+
+    auto list = it->second;
+    preloaded.erase(it);
+
+    if (crossfadeMs <= 0)
+        publish(list);
+    else
+        publishWithCrossfade(list, crossfadeMs);
+
+    HostDebug::log("Activated preloaded chain handle=" + juce::String(handle)
+                   + " (crossfade " + juce::String(crossfadeMs) + " ms)");
+    return true;
+}
+
+void PluginChain::releasePreload(int handle)
+{
+    const juce::ScopedLock sl(editLock);
+    preloaded.erase(handle);
+}
+
 int PluginChain::getNumSlots() const
 {
     return (int) currentList()->size();
@@ -330,6 +374,10 @@ void PluginChain::prepare(double sampleRate, int blockSize, int inputChannels, i
 
     if (auto in = fadeInList.load())   // a crossfade target, if mid-transition
         for (const auto& slot : *in)
+            prepareSlot(*slot);
+
+    for (auto& entry : preloaded)      // keep preloaded chains ready at the current sr/bs
+        for (const auto& slot : *entry.second)
             prepareSlot(*slot);
 
     processingChannelCount.store(computeChannelCount(*cur));

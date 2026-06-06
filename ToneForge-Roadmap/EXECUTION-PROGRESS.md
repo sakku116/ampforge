@@ -22,8 +22,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 ## State
 - Current branch: `feat/phase-2-pedalboard`
 - Last good commit: (lihat `git log --oneline -1`)
-- Next task: 3.3 (preloaded presets) — on branch feat/phase-3-performance
-- Build status: GREEN (3.2 crossfade switching)
+- Next task: 3.4 (CPU/DSP/latency monitoring) — on branch feat/phase-3-performance
+- Build status: GREEN (3.3 preloaded presets)
 
 ## Konvensi
 - Branch per phase: `feat/phase-2-pedalboard`, `feat/phase-3-performance`, `feat/phase-4-live-control`. Merge ke `main` saat phase selesai & build hijau.
@@ -44,8 +44,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 ## Phase 3 — Performance  (branch `feat/phase-3-performance`)
 - [x] 3.1 Chain swap realtime-safe (atomic shared_ptr; hapus CriticalSection dari audio path)
 - [x] 3.2 Crossfade switching (old/new paralel, gain ramp)
-- [~] 3.3 Preloaded presets (prepare di awal, swap atomik <50ms)
-- [ ] 3.4 Monitoring CPU / DSP load / latency
+- [x] 3.3 Preloaded presets (prepare di awal, swap atomik <50ms)
+- [~] 3.4 Monitoring CPU / DSP load / latency
 - [ ] 3.5 UI metrics bar (Timer)
 - [ ] 3.6 Instrumentasi switch-time + build hijau + merge
 

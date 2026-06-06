@@ -48,6 +48,13 @@ public:
     bool switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs);
     bool isTransitioning() const { return fadeInList.load() != nullptr; }
 
+    /** Builds a chain ahead of the switch moment; returns a handle (>0). */
+    int  preloadChain(const juce::Array<SlotSpec>& specs);
+    /** Crossfade-switches to a previously preloaded chain (instant if crossfadeMs<=0).
+        The instances are already built, so this is the <50 ms switch path. */
+    bool activateChain(int handle, int crossfadeMs);
+    void releasePreload(int handle);
+
     // ── Queries (message thread) ─────────────────────────────────────────────
     int getNumSlots() const;
     juce::Array<SlotInfo> getSlotInfos() const;
@@ -92,6 +99,9 @@ private:
 
     std::atomic<int> requestedFadeSamples { 0 };
     std::atomic<juce::uint32> transitionEpoch { 0 };
+
+    std::map<int, std::shared_ptr<SlotList>> preloaded;   // message-thread: chains built ahead
+    int nextPreloadHandle = 1;
 
     // audio-thread only:
     juce::AudioBuffer<float> fadeScratch;

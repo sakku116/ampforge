@@ -31,6 +31,11 @@ public:
     bool switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs);
     juce::Array<PluginChain::SlotSpec> captureChain() const { return chain.captureSpecs(); }
 
+    // Preloaded switching (build ahead, then switch in <50 ms) — used by scenes.
+    int  preloadChain(const juce::Array<PluginChain::SlotSpec>& specs) { return chain.preloadChain(specs); }
+    bool activatePreloaded(int handle, int crossfadeMs) { closeAllEditors(); return chain.activateChain(handle, crossfadeMs); }
+    void releasePreload(int handle) { chain.releasePreload(handle); }
+
     // ── Editor ───────────────────────────────────────────────────────────────
     void openEditorWindow(int index);
     void closeAllEditors();

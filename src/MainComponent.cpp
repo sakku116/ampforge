@@ -83,6 +83,13 @@ MainComponent::MainComponent()
     controlLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(controlLabel);
 
+    sceneDirtyLabel.setText(juce::String::fromUTF8("\xe2\x97\x8f modified"), juce::dontSendNotification);
+    sceneDirtyLabel.setFont(juce::FontOptions(12.5f, juce::Font::bold));
+    sceneDirtyLabel.setColour(juce::Label::textColourId, tf::colour::warn);
+    sceneDirtyLabel.setJustificationType(juce::Justification::centredLeft);
+    sceneDirtyLabel.setVisible(false);
+    addAndMakeVisible(sceneDirtyLabel);
+
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
@@ -186,7 +193,9 @@ void MainComponent::resized()
         auto sceneRow = f.removeFromTop(rowH);
         sceneLabel.setBounds(sceneRow.removeFromLeft(70));
         sceneSelector.setBounds(sceneRow.removeFromLeft(200));
-        sceneRow.removeFromLeft(10);
+        sceneRow.removeFromLeft(6);
+        sceneDirtyLabel.setBounds(sceneRow.removeFromLeft(82));
+        sceneRow.removeFromLeft(4);
         captureSceneButton.setBounds(sceneRow.removeFromLeft(92));
         sceneRow.removeFromLeft(6);
         updateSceneButton.setBounds(sceneRow.removeFromLeft(86));
@@ -382,6 +391,7 @@ void MainComponent::captureScene()
     sceneManager.setCurrentIndex(idx);
     refreshSceneSelector();
     saveScenes();
+    setSceneDirty(false);
     HostDebug::log("Scene captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
 }
 
@@ -394,6 +404,7 @@ void MainComponent::updateScene()
 
     sceneManager.replaceScene(idx, pluginHost.captureChain());
     saveScenes();
+    setSceneDirty(false);
     HostDebug::log("Scene updated: index " + juce::String(idx));
 }
 
@@ -407,6 +418,7 @@ void MainComponent::deleteScene()
     sceneManager.removeScene(idx);
     refreshSceneSelector();
     saveScenes();
+    setSceneDirty(false);
     HostDebug::log("Scene deleted: index " + juce::String(idx));
 }
 
@@ -419,6 +431,7 @@ void MainComponent::recallScene(int index)
     pluginHost.switchChainWithCrossfade(sceneManager.getScene(index).specs, 25);
     refreshChainList();
     refreshSceneSelector();
+    setSceneDirty(false);
     HostDebug::log("Scene recalled: index " + juce::String(index));
 }
 
@@ -520,6 +533,23 @@ void MainComponent::updateControlLabel()
     controlLabel.setText(text, juce::dontSendNotification);
 }
 
+void MainComponent::setSceneDirty(bool dirty)
+{
+    sceneDirty = dirty;
+    sceneDirtyLabel.setVisible(dirty);
+
+    if (dirty)
+    {
+        updateSceneButton.setColour(juce::TextButton::buttonColourId, tf::colour::warn.withAlpha(0.25f));
+        updateSceneButton.setColour(juce::TextButton::textColourOffId, tf::colour::warn);
+    }
+    else
+    {
+        updateSceneButton.removeColour(juce::TextButton::buttonColourId);
+        updateSceneButton.removeColour(juce::TextButton::textColourOffId);
+    }
+}
+
 void MainComponent::saveControlMap()
 {
     if (auto* settings = appProperties.getUserSettings())
@@ -614,6 +644,9 @@ void MainComponent::addSelectedToChain()
     {
         refreshChainList();
         chainListBox.selectRow(pluginHost.getNumSlots() - 1);
+
+        if (sceneManager.getCurrentIndex() >= 0)
+            setSceneDirty(true);
     }
 }
 
@@ -628,6 +661,9 @@ void MainComponent::moveSlotAt(int row, int delta)
     pluginHost.movePlugin(row, target);
     refreshChainList();
     chainListBox.selectRow(target);
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
 }
 
 void MainComponent::toggleBypassAt(int row)
@@ -639,6 +675,9 @@ void MainComponent::toggleBypassAt(int row)
     pluginHost.setBypass(row, ! infos.getReference(row).bypassed);
     refreshChainList();
     chainListBox.selectRow(row);
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
 }
 
 void MainComponent::removeSlotAt(int row)
@@ -649,6 +688,9 @@ void MainComponent::removeSlotAt(int row)
     HostDebug::log("UI: Remove chain slot " + juce::String(row));
     pluginHost.removePlugin(row);
     refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
 }
 
 void MainComponent::openEditorAt(int row)
@@ -726,6 +768,9 @@ void MainComponent::loadPresetFile(const juce::File& file)
     refreshChainList();
     saveLastPresetPath(file);
     HostDebug::log("Preset applied: " + file.getFileName());
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
 }
 
 void MainComponent::saveLastPresetPath(const juce::File& file)

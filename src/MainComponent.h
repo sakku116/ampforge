@@ -169,6 +169,7 @@ private:
     juce::TextButton prevSceneButton     { "< Prev" };
     juce::TextButton nextSceneButton     { "Next >" };
     juce::ComboBox   sceneSelector;
+    juce::Label      sceneDirtyLabel;   // "●" shown when current chain differs from active scene
 
     juce::Label      controlLabel;
     juce::TextButton learnBypassButton    { "Learn Bypass" };
@@ -188,6 +189,10 @@ private:
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;
+
+    // ── Scene dirty tracking ──────────────────────────────────────────────────
+    bool sceneDirty = false;
+    void setSceneDirty(bool dirty);
 
     // ── Live control ───────────────────────────────────────────────────────────
     ControlMap controlMap;

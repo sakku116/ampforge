@@ -13,20 +13,54 @@ void PluginScanner::scanAll()
     scanDefaultWindowsVST2Folders();
 }
 
+void PluginScanner::scanFormatOnPaths(juce::AudioPluginFormat& format,
+                                       const juce::FileSearchPath& searchPath,
+                                       const char* flagToUse,
+                                       const juce::String& formatLabel)
+{
+    // JUCE search finds both bundle folders and single-file DLLs.
+    const auto pluginPaths = format.searchPathsForPlugins(searchPath, true, false);
+
+    HostDebug::log(formatLabel + " paths on disk: " + juce::String(pluginPaths.size()));
+
+    for (const auto& p : pluginPaths)
+        HostDebug::log("  found: " + p);
+
+    int failures = 0, crashes = 0;
+
+    for (const auto& p : pluginPaths)
+    {
+        const auto before = knownPluginList.getNumTypes();
+
+        if (! ScanSubprocess::scanFileInChildProcess(p, knownPluginList, flagToUse))
+        {
+            ++crashes;
+            HostDebug::log("  scan CRASHED or worker failed (skipped): " + p);
+            continue;
+        }
+
+        if (knownPluginList.getNumTypes() - before <= 0)
+        {
+            ++failures;
+            HostDebug::log("  scan failed (0 types): " + p);
+        }
+    }
+
+    HostDebug::log(formatLabel + " scan done — "
+                   + juce::String(knownPluginList.getNumTypes()) + " total plugin(s), "
+                   + juce::String(failures) + " path(s) with no types, "
+                   + juce::String(crashes) + " crash(es)");
+}
+
 void PluginScanner::scanDefaultWindowsVST3Folders()
 {
     HostDebug::log("VST3 scan started");
 
     juce::AudioPluginFormat* vst3Format = nullptr;
 
-    for (auto* format : formatManager.getFormats())
-    {
-        if (format->getName().containsIgnoreCase("VST3"))
-        {
-            vst3Format = format;
-            break;
-        }
-    }
+    for (auto* f : formatManager.getFormats())
+        if (f->getName().containsIgnoreCase("VST3"))
+            { vst3Format = f; break; }
 
     if (vst3Format == nullptr)
     {
@@ -34,53 +68,17 @@ void PluginScanner::scanDefaultWindowsVST3Folders()
         return;
     }
 
-    juce::StringArray paths;
-
-   #if JUCE_WINDOWS
-    paths.add("C:\\Program Files\\Common Files\\VST3");
-    paths.add("C:\\Program Files (x86)\\Common Files\\VST3");
-   #endif
-
     juce::FileSearchPath searchPath;
 
-    for (const auto& path : paths)
-        searchPath.add(path);
+   #if JUCE_WINDOWS
+    searchPath.add(juce::File("C:\\Program Files\\Common Files\\VST3"));
+    searchPath.add(juce::File("C:\\Program Files (x86)\\Common Files\\VST3"));
+   #endif
 
-    // JUCE search finds both bundle folders (AmpliTube) and single-file .vst3 DLLs
-    // (Neural DSP, Overloud, Tonocracy). findChildFiles(findDirectories) missed the latter.
-    const auto pluginPaths = vst3Format->searchPathsForPlugins(searchPath, true, false);
+    for (const auto& p : customPaths)
+        searchPath.add(juce::File(p));
 
-    HostDebug::log("VST3 paths on disk: " + juce::String(pluginPaths.size()));
-
-    for (const auto& pluginPath : pluginPaths)
-        HostDebug::log("  found: " + pluginPath);
-
-    int scanFailures = 0;
-    int scanCrashes = 0;
-
-    for (const auto& pluginPath : pluginPaths)
-    {
-        const auto typesBefore = knownPluginList.getNumTypes();
-
-        if (! ScanSubprocess::scanFileInChildProcess(pluginPath, knownPluginList))
-        {
-            ++scanCrashes;
-            HostDebug::log("  scan CRASHED or worker failed (skipped): " + pluginPath);
-            continue;
-        }
-
-        const auto added = knownPluginList.getNumTypes() - typesBefore;
-
-        if (added <= 0)
-        {
-            ++scanFailures;
-            HostDebug::log("  scan failed (0 types): " + pluginPath);
-        }
-    }
-
-    HostDebug::log("VST3 scan done — " + juce::String(knownPluginList.getNumTypes()) + " plugin(s), "
-                   + juce::String(scanFailures) + " path(s) with no types, "
-                   + juce::String(scanCrashes) + " crash(es)");
+    scanFormatOnPaths(*vst3Format, searchPath, ScanSubprocess::scanVst3Flag, "VST3");
 }
 
 void PluginScanner::scanDefaultWindowsVST2Folders()
@@ -89,14 +87,9 @@ void PluginScanner::scanDefaultWindowsVST2Folders()
 
     juce::AudioPluginFormat* vstFormat = nullptr;
 
-    for (auto* format : formatManager.getFormats())
-    {
-        if (format->getName() == "VST")
-        {
-            vstFormat = format;
-            break;
-        }
-    }
+    for (auto* f : formatManager.getFormats())
+        if (f->getName() == "VST")
+            { vstFormat = f; break; }
 
     if (vstFormat == nullptr)
     {
@@ -104,53 +97,18 @@ void PluginScanner::scanDefaultWindowsVST2Folders()
         return;
     }
 
-    juce::StringArray paths;
-
-   #if JUCE_WINDOWS
-    paths.add("C:\\Program Files\\VSTPlugins");
-    paths.add("C:\\Program Files (x86)\\VSTPlugins");
-    paths.add("C:\\Program Files\\Steinberg\\VSTPlugins");
-    paths.add("C:\\Program Files (x86)\\Steinberg\\VSTPlugins");
-    paths.add("C:\\Program Files\\Common Files\\VST2");
-   #endif
-
     juce::FileSearchPath searchPath;
 
-    for (const auto& path : paths)
-        searchPath.add(path);
+   #if JUCE_WINDOWS
+    searchPath.add(juce::File("C:\\Program Files\\VSTPlugins"));
+    searchPath.add(juce::File("C:\\Program Files (x86)\\VSTPlugins"));
+    searchPath.add(juce::File("C:\\Program Files\\Steinberg\\VSTPlugins"));
+    searchPath.add(juce::File("C:\\Program Files (x86)\\Steinberg\\VSTPlugins"));
+    searchPath.add(juce::File("C:\\Program Files\\Common Files\\VST2"));
+   #endif
 
-    const auto pluginPaths = vstFormat->searchPathsForPlugins(searchPath, true, false);
+    for (const auto& p : customPaths)
+        searchPath.add(juce::File(p));
 
-    HostDebug::log("VST2 paths on disk: " + juce::String(pluginPaths.size()));
-
-    for (const auto& pluginPath : pluginPaths)
-        HostDebug::log("  found: " + pluginPath);
-
-    int scanFailures = 0;
-    int scanCrashes  = 0;
-
-    for (const auto& pluginPath : pluginPaths)
-    {
-        const auto typesBefore = knownPluginList.getNumTypes();
-
-        if (! ScanSubprocess::scanFileInChildProcess(pluginPath, knownPluginList,
-                                                      ScanSubprocess::scanVst2Flag))
-        {
-            ++scanCrashes;
-            HostDebug::log("  scan CRASHED or worker failed (skipped): " + pluginPath);
-            continue;
-        }
-
-        const auto added = knownPluginList.getNumTypes() - typesBefore;
-
-        if (added <= 0)
-        {
-            ++scanFailures;
-            HostDebug::log("  scan failed (0 types): " + pluginPath);
-        }
-    }
-
-    HostDebug::log("VST2 scan done — " + juce::String(knownPluginList.getNumTypes()) + " total plugin(s), "
-                   + juce::String(scanFailures) + " path(s) with no types, "
-                   + juce::String(scanCrashes) + " crash(es)");
+    scanFormatOnPaths(*vstFormat, searchPath, ScanSubprocess::scanVst2Flag, "VST2");
 }

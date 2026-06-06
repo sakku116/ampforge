@@ -57,6 +57,151 @@ private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioSettingsWindow)
     };
 
+    // ── Scan paths window ─────────────────────────────────────────────────────
+
+    /** Content component: a list of custom scan directories with Add/Remove buttons. */
+    class ScanPathsContent : public juce::Component,
+                             private juce::ListBoxModel
+    {
+    public:
+        ScanPathsContent(juce::StringArray initialPaths,
+                         std::function<void(const juce::StringArray&)> onChange)
+            : paths(std::move(initialPaths)), onPathsChanged(std::move(onChange))
+        {
+            addAndMakeVisible(pathListBox);
+            pathListBox.setModel(this);
+            pathListBox.setRowHeight(26);
+
+            addButton   .setButtonText("+ Add Directory...");
+            removeButton.setButtonText("Remove Selected");
+
+            addButton.onClick    = [this] { addPath(); };
+            removeButton.onClick = [this] { removePath(); };
+
+            addAndMakeVisible(addButton);
+            addAndMakeVisible(removeButton);
+
+            hint.setText("These paths are searched in addition to the defaults.\n"
+                         "Both VST3 and VST2 (if enabled) are scanned in every listed directory.",
+                         juce::dontSendNotification);
+            hint.setFont(juce::FontOptions(12.0f));
+            hint.setColour(juce::Label::textColourId, juce::Colours::grey);
+            hint.setJustificationType(juce::Justification::topLeft);
+            addAndMakeVisible(hint);
+        }
+
+        ~ScanPathsContent() override = default;
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced(12);
+            hint.setBounds(area.removeFromBottom(34));
+            area.removeFromBottom(6);
+            auto btnRow = area.removeFromBottom(30);
+            area.removeFromBottom(6);
+            addButton.setBounds(btnRow.removeFromLeft(150));
+            btnRow.removeFromLeft(8);
+            removeButton.setBounds(btnRow.removeFromLeft(130));
+            pathListBox.setBounds(area);
+        }
+
+        void paint(juce::Graphics& g) override { g.fillAll(tf::colour::surface); }
+
+    private:
+        int  getNumRows() override { return paths.size(); }
+
+        void paintListBoxItem(int row, juce::Graphics& g, int w, int h, bool sel) override
+        {
+            if (sel)
+            {
+                g.setColour(tf::colour::accent.withAlpha(0.16f));
+                g.fillRoundedRectangle(juce::Rectangle<int>(2, 1, w - 4, h - 2).toFloat(), 4.0f);
+            }
+            if (juce::isPositiveAndBelow(row, paths.size()))
+            {
+                g.setColour(sel ? tf::colour::text : tf::colour::text.withAlpha(0.85f));
+                g.setFont(juce::FontOptions(13.0f));
+                g.drawText(paths[row], 10, 0, w - 14, h,
+                           juce::Justification::centredLeft, true);
+            }
+        }
+
+        void addPath()
+        {
+            fileChooser = std::make_unique<juce::FileChooser>("Select Plugin Directory");
+            fileChooser->launchAsync(juce::FileBrowserComponent::openMode |
+                                      juce::FileBrowserComponent::canSelectDirectories,
+                [this](const juce::FileChooser& fc)
+                {
+                    const auto dir = fc.getResult();
+                    if (dir.isDirectory())
+                    {
+                        const auto p = dir.getFullPathName();
+                        if (! paths.contains(p))
+                        {
+                            paths.add(p);
+                            pathListBox.updateContent();
+                            if (onPathsChanged) onPathsChanged(paths);
+                        }
+                    }
+                });
+        }
+
+        void removePath()
+        {
+            const int row = pathListBox.getSelectedRow();
+            if (juce::isPositiveAndBelow(row, paths.size()))
+            {
+                paths.remove(row);
+                pathListBox.updateContent();
+                if (onPathsChanged) onPathsChanged(paths);
+            }
+        }
+
+        juce::StringArray paths;
+        std::function<void(const juce::StringArray&)> onPathsChanged;
+
+        juce::ListBox   pathListBox;
+        juce::TextButton addButton, removeButton;
+        juce::Label      hint;
+        std::unique_ptr<juce::FileChooser> fileChooser;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ScanPathsContent)
+    };
+
+    class ScanPathsWindow : public juce::DocumentWindow
+    {
+    public:
+        ScanPathsWindow(juce::StringArray initialPaths,
+                        std::function<void(const juce::StringArray&)> onChanged,
+                        std::function<void()> onClose)
+            : juce::DocumentWindow("Plugin Scan Paths",
+                                   tf::colour::surface,
+                                   juce::DocumentWindow::closeButton),
+              onCloseCallback(std::move(onClose))
+        {
+            setUsingNativeTitleBar(true);
+            setResizable(true, false);
+
+            auto* content = new ScanPathsContent(std::move(initialPaths),
+                                                  std::move(onChanged));
+            content->setSize(540, 310);
+            setContentOwned(content, true);
+            centreWithSize(540, 330);
+            setVisible(true);
+        }
+
+        void closeButtonPressed() override
+        {
+            onCloseCallback();
+            setVisible(false);
+        }
+
+    private:
+        std::function<void()> onCloseCallback;
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ScanPathsWindow)
+    };
+
     // ── Plain text list model (palette / library) ─────────────────────────────
     class SimpleListModel : public juce::ListBoxModel
     {
@@ -102,6 +247,10 @@ private:
     void buttonClicked(juce::Button* button) override;
     void timerCallback() override;
     bool keyPressed(const juce::KeyPress& key) override;
+
+    void openScanPaths();
+    void saveScanPaths(const juce::StringArray& paths);
+    void restoreScanPaths();
 
     void refreshPaletteList();
     void refreshChainList();
@@ -174,6 +323,7 @@ private:
 
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::TextButton scanButton          { "Rescan Plugins" };
+    juce::TextButton scanPathsButton     { "Scan Paths..." };
     juce::TextButton addButton           { "+ Add to Chain" };
     juce::TextButton savePresetButton    { "Save" };
     juce::TextButton loadPresetButton    { "Load" };
@@ -208,6 +358,7 @@ private:
     juce::Rectangle<int> headerPanel, libraryPanel, chainPanel, footerPanel;
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
+    std::unique_ptr<ScanPathsWindow>     scanPathsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     // ── Scene dirty tracking ──────────────────────────────────────────────────
@@ -225,10 +376,11 @@ private:
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
-    static constexpr const char* audioDeviceStateKey = "audioDeviceState";
-    static constexpr const char* lastPresetPathKey   = "lastPresetPath";
-    static constexpr const char* scenesStateKey      = "scenes";
-    static constexpr const char* controlMapStateKey  = "controlMap";
+    static constexpr const char* audioDeviceStateKey  = "audioDeviceState";
+    static constexpr const char* lastPresetPathKey    = "lastPresetPath";
+    static constexpr const char* scenesStateKey       = "scenes";
+    static constexpr const char* controlMapStateKey   = "controlMap";
+    static constexpr const char* pluginScanPathsKey   = "pluginScanPaths";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

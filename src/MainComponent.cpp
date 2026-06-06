@@ -107,7 +107,7 @@ MainComponent::MainComponent()
     prevSceneButton   .setTooltip("Previous scene");
     nextSceneButton   .setTooltip("Next scene");
 
-    for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
+    for (auto* b : { &audioSettingsButton, &scanButton, &scanPathsButton, &addButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &renameSceneButton,
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
@@ -155,6 +155,8 @@ MainComponent::MainComponent()
 
     startTimerHz(10);   // performance metrics refresh
 
+    restoreScanPaths();
+
     HostDebug::log("MainComponent ready — scheduling plugin scan");
 
     juce::MessageManager::callAsync([this]
@@ -190,7 +192,7 @@ MainComponent::~MainComponent()
 
     stopTimer();
 
-    for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
+    for (auto* b : { &audioSettingsButton, &scanButton, &scanPathsButton, &addButton,
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &renameSceneButton,
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
@@ -259,6 +261,8 @@ void MainComponent::resized()
     audioSettingsButton.setBounds(toolbar.removeFromLeft(140));
     toolbar.removeFromLeft(8);
     scanButton.setBounds(toolbar.removeFromLeft(130));
+    toolbar.removeFromLeft(6);
+    scanPathsButton.setBounds(toolbar.removeFromLeft(100));
     area.removeFromTop(gap);
 
     // ── Footer panel (scenes + control), pinned to the bottom ─────────────────
@@ -347,6 +351,8 @@ void MainComponent::buttonClicked(juce::Button* button)
         refreshPaletteList();
         return;
     }
+
+    if (button == &scanPathsButton) { openScanPaths(); return; }
 
     if (button == &addButton)    { addSelectedToChain();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
@@ -712,6 +718,47 @@ void MainComponent::restoreControlMap()
         updateControlLabel();
         HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
     }
+}
+
+void MainComponent::openScanPaths()
+{
+    if (scanPathsWindow != nullptr && scanPathsWindow->isVisible())
+    {
+        scanPathsWindow->toFront(true);
+        return;
+    }
+
+    scanPathsWindow = std::make_unique<ScanPathsWindow>(
+        pluginScanner.getCustomPaths(),
+        [this](const juce::StringArray& paths)
+        {
+            saveScanPaths(paths);
+            pluginScanner.setCustomPaths(paths);
+        },
+        [this] { scanPathsWindow.reset(); });
+}
+
+void MainComponent::saveScanPaths(const juce::StringArray& paths)
+{
+    auto* settings = appProperties.getUserSettings();
+    if (settings == nullptr) return;
+
+    settings->setValue(pluginScanPathsKey, paths.joinIntoString("\n"));
+    settings->saveIfNeeded();
+    HostDebug::log("Scan paths saved: " + juce::String(paths.size()) + " path(s)");
+}
+
+void MainComponent::restoreScanPaths()
+{
+    auto* settings = appProperties.getUserSettings();
+    if (settings == nullptr) return;
+
+    const auto stored = settings->getValue(pluginScanPathsKey);
+    if (stored.isEmpty()) return;
+
+    const auto paths = juce::StringArray::fromLines(stored);
+    pluginScanner.setCustomPaths(paths);
+    HostDebug::log("Scan paths restored: " + juce::String(paths.size()) + " path(s)");
 }
 
 void MainComponent::timerCallback()

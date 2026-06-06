@@ -22,8 +22,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 ## State
 - Current branch: `feat/phase-2-pedalboard`
 - Last good commit: (lihat `git log --oneline -1`)
-- Next task: 4.1 (MIDI input) — Phase 3 MERGED to main; on branch feat/phase-4-live-control
-- Build status: GREEN (Phase 3 complete; startup smoke test passed)
+- Next task: 4.2 (ControlMap) — on branch feat/phase-4-live-control
+- Build status: GREEN (4.1 MIDI input)
 
 ## Konvensi
 - Branch per phase: `feat/phase-2-pedalboard`, `feat/phase-3-performance`, `feat/phase-4-live-control`. Merge ke `main` saat phase selesai & build hijau.
@@ -50,8 +50,8 @@ Trigger user: cukup ketik **"lanjut eksekusi toneforge"**.
 - [x] 3.6 Instrumentasi switch-time + build hijau + smoke test + merge
 
 ## Phase 4 — Live Control  (branch `feat/phase-4-live-control`)
-- [ ] 4.1 MIDI input (device enable, MidiMessageCollector, inject ke processBlock)
-- [ ] 4.2 ControlMap (trigger→action) + learn mode
+- [x] 4.1 MIDI input (device enable, MidiMessageCollector, inject ke processBlock)
+- [~] 4.2 ControlMap (trigger→action) + learn mode
 - [ ] 4.3 Keyboard mapping (KeyListener)
 - [ ] 4.4 Footswitch (reuse ControlMap)
 - [ ] 4.5 Scenes (snapshot pedalboard, switch via crossfade)

@@ -30,6 +30,13 @@ juce::String ControlTrigger::toString() const
     }
 }
 
+juce::String ExpressionBinding::toString() const
+{
+    const auto chan = channel == 0 ? juce::String("any") : juce::String(channel);
+    return "CC " + juce::String(ccNumber) + " (ch " + chan + ") -> slot "
+         + juce::String(slotIndex + 1) + " param " + juce::String(paramIndex);
+}
+
 juce::String ControlAction::toString() const
 {
     switch (type)
@@ -113,6 +120,35 @@ ControlAction ControlMap::matchKey(int keyCode) const
     return match(trigger);
 }
 
+void ControlMap::addExpression(ExpressionBinding binding)
+{
+    expressions.push_back(binding);
+}
+
+void ControlMap::removeExpression(int index)
+{
+    if (juce::isPositiveAndBelow(index, (int) expressions.size()))
+        expressions.erase(expressions.begin() + index);
+}
+
+juce::Array<ExpressionTarget> ControlMap::matchExpressions(const juce::MidiMessage& message) const
+{
+    juce::Array<ExpressionTarget> targets;
+
+    if (! message.isController())
+        return targets;
+
+    const int cc = message.getControllerNumber();
+    const int chan = message.getChannel();
+    const float value = (float) message.getControllerValue() / 127.0f;
+
+    for (const auto& e : expressions)
+        if (e.ccNumber == cc && (e.channel == 0 || chan == 0 || e.channel == chan))
+            targets.add({ e.slotIndex, e.paramIndex, value });
+
+    return targets;
+}
+
 juce::ValueTree ControlMap::toValueTree() const
 {
     juce::ValueTree root("CONTROLMAP");
@@ -128,12 +164,23 @@ juce::ValueTree ControlMap::toValueTree() const
         root.addChild(node, -1, nullptr);
     }
 
+    for (const auto& e : expressions)
+    {
+        juce::ValueTree node("EXPR");
+        node.setProperty("channel", e.channel, nullptr);
+        node.setProperty("cc", e.ccNumber, nullptr);
+        node.setProperty("slot", e.slotIndex, nullptr);
+        node.setProperty("param", e.paramIndex, nullptr);
+        root.addChild(node, -1, nullptr);
+    }
+
     return root;
 }
 
 void ControlMap::fromValueTree(const juce::ValueTree& tree)
 {
     bindings.clear();
+    expressions.clear();
 
     if (! tree.hasType("CONTROLMAP"))
         return;
@@ -142,15 +189,24 @@ void ControlMap::fromValueTree(const juce::ValueTree& tree)
     {
         auto node = tree.getChild(i);
 
-        if (! node.hasType("BINDING"))
-            continue;
-
-        ControlBinding binding;
-        binding.trigger.type    = (ControlTrigger::Type) (int) node.getProperty("trigType");
-        binding.trigger.channel = (int) node.getProperty("trigChannel");
-        binding.trigger.number  = (int) node.getProperty("trigNumber");
-        binding.action.type     = (ControlAction::Type) (int) node.getProperty("actType");
-        binding.action.index    = (int) node.getProperty("actIndex");
-        bindings.push_back(binding);
+        if (node.hasType("BINDING"))
+        {
+            ControlBinding binding;
+            binding.trigger.type    = (ControlTrigger::Type) (int) node.getProperty("trigType");
+            binding.trigger.channel = (int) node.getProperty("trigChannel");
+            binding.trigger.number  = (int) node.getProperty("trigNumber");
+            binding.action.type     = (ControlAction::Type) (int) node.getProperty("actType");
+            binding.action.index    = (int) node.getProperty("actIndex");
+            bindings.push_back(binding);
+        }
+        else if (node.hasType("EXPR"))
+        {
+            ExpressionBinding e;
+            e.channel    = (int) node.getProperty("channel");
+            e.ccNumber   = (int) node.getProperty("cc");
+            e.slotIndex  = (int) node.getProperty("slot");
+            e.paramIndex = (int) node.getProperty("param");
+            expressions.push_back(e);
+        }
     }
 }

@@ -26,6 +26,10 @@ public:
     juce::Array<PluginChain::SlotInfo> getSlotInfos() const { return chain.getSlotInfos(); }
     int getChainLatencySamples() const { return chain.getTotalLatencySamples(); }
 
+    /** Sets a normalised (0..1) value on a slot's plugin parameter (expression mapping). */
+    void setParameter(int slotIndex, int paramIndex, float value);
+    int getParameterCount(int slotIndex) const;
+
     /** Rebuilds the whole chain from preset/scene specs (closes editors first). */
     bool rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs);
     /** Crossfade-switches the chain to a new preset/scene (closes editors first). */

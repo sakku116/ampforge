@@ -202,6 +202,10 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
         return;
     }
 
+    // Expression pedals: apply continuous CC -> parameter directly (high message rate).
+    for (const auto& target : controlMap.matchExpressions(message))
+        pluginHost.setParameter(target.slotIndex, target.paramIndex, target.value);
+
     const auto action = controlMap.matchMidi(message);
 
     if (! action.isValid())

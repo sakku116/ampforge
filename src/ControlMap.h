@@ -35,6 +35,24 @@ struct ControlBinding
     ControlAction action;
 };
 
+/** Continuous mapping: a MIDI CC drives a plugin parameter (expression pedal). */
+struct ExpressionBinding
+{
+    int channel = 0;     // 1-16, 0 = any
+    int ccNumber = 0;
+    int slotIndex = 0;
+    int paramIndex = 0;
+    juce::String toString() const;
+};
+
+/** A resolved target to apply (slot/param + normalised 0..1 value). */
+struct ExpressionTarget
+{
+    int slotIndex = 0;
+    int paramIndex = 0;
+    float value = 0.0f;
+};
+
 /** Maps triggers (MIDI / keyboard / footswitch) to actions. Pure lookup + storage;
     the owner executes the returned actions. */
 class ControlMap
@@ -53,6 +71,14 @@ public:
     ControlAction matchMidi(const juce::MidiMessage& message) const;
     ControlAction matchKey(int keyCode) const;
 
+    // ── Expression (continuous CC -> parameter) ──────────────────────────────
+    void addExpression(ExpressionBinding binding);
+    void removeExpression(int index);
+    int getNumExpressions() const { return (int) expressions.size(); }
+    const ExpressionBinding& getExpression(int index) const { return expressions[(size_t) index]; }
+    /** Resolves any expression bindings that a CC message drives. */
+    juce::Array<ExpressionTarget> matchExpressions(const juce::MidiMessage& message) const;
+
     juce::ValueTree toValueTree() const;
     void fromValueTree(const juce::ValueTree& tree);
 
@@ -60,4 +86,5 @@ private:
     ControlAction match(const ControlTrigger& incoming) const;
 
     std::vector<ControlBinding> bindings;
+    std::vector<ExpressionBinding> expressions;
 };

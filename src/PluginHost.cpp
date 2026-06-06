@@ -122,6 +122,25 @@ void PluginHost::unloadPlugin()
     clearChain();
 }
 
+void PluginHost::setParameter(int slotIndex, int paramIndex, float value)
+{
+    if (auto* instance = chain.getInstance(slotIndex))
+    {
+        const auto& params = instance->getParameters();
+
+        if (juce::isPositiveAndBelow(paramIndex, params.size()))
+            params[paramIndex]->setValue(juce::jlimit(0.0f, 1.0f, value));
+    }
+}
+
+int PluginHost::getParameterCount(int slotIndex) const
+{
+    if (auto* instance = chain.getInstance(slotIndex))
+        return instance->getParameters().size();
+
+    return 0;
+}
+
 // ── Audio ────────────────────────────────────────────────────────────────────
 void PluginHost::prepare(double sampleRate, int blockSize, int inputChannels, int outputChannels)
 {

@@ -11,6 +11,7 @@
 #include "ChainListBox.h"
 
 class MainComponent : public juce::Component,
+                      public juce::DragAndDropContainer,
                       private juce::Button::Listener,
                       private juce::Timer
 {
@@ -108,11 +109,23 @@ private:
     int  getSelectedChainRow() const;
     void addSelectedToChain();
 
-    // Per-slot chain actions (driven by the inline row buttons).
-    void toggleBypassAt(int row);
-    void moveSlotAt(int row, int delta);
-    void removeSlotAt(int row);
-    void openEditorAt(int row);
+    // Per-slot chain actions (driven by the inline row buttons, receive slotIndex).
+    void toggleBypassAt(int slotIndex);
+    void activatePresetSlotAt(int slotIndex);
+    void moveSlotAt(int fromSlotIndex, int toSlotIndex, int sectionIdOverride = -1);
+    void removeSlotAt(int slotIndex);
+    void openEditorAt(int slotIndex);
+
+    // Section actions.
+    void addSectionOfType(PluginChain::SectionDef::Type type);
+    void removeSectionAt(int sectionId);
+    void renameSectionAt(int sectionId);
+    void moveSectionUpAt(int sectionId);
+    void moveSectionDownAt(int sectionId);
+
+    // Helpers for ChainRow ↔ slotIndex mapping.
+    int  rowToSlotIndex(int row) const;
+    int  getTargetSectionId() const;
 
     void savePreset();
     void loadPreset();
@@ -174,18 +187,22 @@ private:
     juce::ComboBox   sceneSelector;
     juce::Label      sceneDirtyLabel;   // "●" shown when current chain differs from active scene
 
+    juce::TextButton addSectionStompButton  { "+ Stomp" };
+    juce::TextButton addSectionPresetButton { "+ Preset" };
+
     juce::Label      controlLabel;
-    juce::TextButton learnBypassButton    { "Learn Bypass" };
-    juce::TextButton learnExprButton      { "Learn Expression" };
-    juce::TextButton learnSceneNextButton { "Learn Scene+" };
-    juce::TextButton learnScenePrevButton { "Learn Scene-" };
-    juce::TextButton clearMapsButton      { "Clear Maps" };
+    juce::TextButton learnBypassButton       { "Learn Bypass" };
+    juce::TextButton learnPresetSelectButton { "Learn Preset Sel" };
+    juce::TextButton learnExprButton         { "Learn Expression" };
+    juce::TextButton learnSceneNextButton    { "Learn Scene+" };
+    juce::TextButton learnScenePrevButton    { "Learn Scene-" };
+    juce::TextButton clearMapsButton         { "Clear Maps" };
 
     juce::StringArray paletteNames;
     SimpleListModel paletteModel { paletteNames };
     ChainListModel  chainModel;
-    juce::ListBox paletteListBox;
-    juce::ListBox chainListBox;
+    juce::ListBox     paletteListBox;
+    ChainListBoxView  chainListBox { chainModel };
 
     // Panel backgrounds, computed in resized() and drawn in paint().
     juce::Rectangle<int> headerPanel, libraryPanel, chainPanel, footerPanel;

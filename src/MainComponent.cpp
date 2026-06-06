@@ -36,7 +36,6 @@ MainComponent::MainComponent()
     paletteListBox.setModel(&paletteModel);
     paletteListBox.setRowHeight(26);
     paletteListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
-    chainListBox.setModel(&chainModel);
     chainListBox.setRowHeight(52);
     chainListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
     addAndMakeVisible(paletteListBox);
@@ -45,20 +44,19 @@ MainComponent::MainComponent()
     // Double-click a library item to add it; the chain rows carry their own buttons.
     paletteModel.onDoubleClick = [this](int) { addSelectedToChain(); };
 
-    chainModel.onBypass    = [this](int r) { toggleBypassAt(r); };
-    chainModel.onMoveUp   = [this](int r) { moveSlotAt(r, -1); };
-    chainModel.onMoveDown = [this](int r) { moveSlotAt(r, +1); };
-    chainModel.onRemove   = [this](int r) { removeSlotAt(r); };
-    chainModel.onEditor   = [this](int r) { openEditorAt(r); };
-    chainModel.onSelect   = [this](int r) { chainListBox.selectRow(r); };
+    chainModel.onBypass    = [this](int si) { toggleBypassAt(si); };
+    chainModel.onRemove    = [this](int si) { removeSlotAt(si); };
+    chainListBox.onMovePlugin = [this](int from, int to, int sid) { moveSlotAt(from, to, sid); };
+    chainModel.onEditor    = [this](int si) { openEditorAt(si); };
+    chainModel.onSelect    = [this](int row) { chainListBox.selectRow(row); };
 
-    chainModel.onRename = [this](int r)
+    chainModel.onRename = [this](int si)
     {
         const auto infos = pluginHost.getSlotInfos();
-        if (! juce::isPositiveAndBelow(r, infos.size()))
+        if (! juce::isPositiveAndBelow(si, infos.size()))
             return;
 
-        const auto& info = infos.getReference(r);
+        const auto& info = infos.getReference(si);
         const juce::String current = info.hasCustomName ? info.name : juce::String{};
 
         auto* dialog = new juce::AlertWindow("Rename Slot",
@@ -69,12 +67,12 @@ MainComponent::MainComponent()
         dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
 
         dialog->enterModalState(true, juce::ModalCallbackFunction::create(
-            [this, r, dialog](int result)
+            [this, si, dialog](int result)
             {
                 if (result == 1)
                 {
                     const juce::String newName = dialog->getTextEditorContents("name").trim();
-                    pluginHost.renameSlot(r, newName);
+                    pluginHost.renameSlot(si, newName);
                     refreshChainList();
                     setSceneDirty(sceneManager.getCurrentIndex() >= 0);
                 }
@@ -82,12 +80,17 @@ MainComponent::MainComponent()
             }), true);
     };
 
-    chainModel.onResetName = [this](int r)
+    chainModel.onResetName = [this](int si)
     {
-        pluginHost.renameSlot(r, {});
+        pluginHost.renameSlot(si, {});
         refreshChainList();
         setSceneDirty(sceneManager.getCurrentIndex() >= 0);
     };
+
+    chainModel.onSectionMoveUp   = [this](int id) { moveSectionUpAt(id); };
+    chainModel.onSectionMoveDown = [this](int id) { moveSectionDownAt(id); };
+    chainModel.onSectionRemove   = [this](int id) { removeSectionAt(id); };
+    chainModel.onSectionRename   = [this](int id) { renameSectionAt(id); };
 
     // Scene action buttons: icon text + tooltip so their purpose is clear at a glance.
     captureSceneButton.setButtonText(juce::String::fromUTF8("\xE2\x8A\x95"));   // ⊕
@@ -108,8 +111,9 @@ MainComponent::MainComponent()
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &renameSceneButton,
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
-                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
-                     &learnScenePrevButton, &clearMapsButton })
+                     &addSectionStompButton, &addSectionPresetButton,
+                     &learnBypassButton, &learnPresetSelectButton, &learnExprButton,
+                     &learnSceneNextButton, &learnScenePrevButton, &clearMapsButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -167,7 +171,8 @@ MainComponent::MainComponent()
         if (juce::isPositiveAndBelow(activeScene, sceneManager.getNumScenes()))
         {
             // Active scene takes priority: rebuild immediately (no crossfade from empty chain).
-            pluginHost.rebuildChain(sceneManager.getScene(activeScene).specs);
+            const auto& scene = sceneManager.getScene(activeScene);
+            pluginHost.rebuildChain(scene.specs, scene.sections);
             refreshChainList();
             HostDebug::log("Startup: applied scene " + juce::String(activeScene));
         }
@@ -189,8 +194,9 @@ MainComponent::~MainComponent()
                      &savePresetButton, &loadPresetButton,
                      &captureSceneButton, &updateSceneButton, &renameSceneButton,
                      &deleteSceneButton, &prevSceneButton, &nextSceneButton,
-                     &learnBypassButton, &learnExprButton, &learnSceneNextButton,
-                     &learnScenePrevButton, &clearMapsButton })
+                     &addSectionStompButton, &addSectionPresetButton,
+                     &learnBypassButton, &learnPresetSelectButton, &learnExprButton,
+                     &learnSceneNextButton, &learnScenePrevButton, &clearMapsButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
@@ -283,16 +289,12 @@ void MainComponent::resized()
 
         auto controlRow = f.removeFromTop(rowH);
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
-        learnBypassButton.setBounds(controlRow.removeFromLeft(108));
-        controlRow.removeFromLeft(6);
-        learnExprButton.setBounds(controlRow.removeFromLeft(126));
-        controlRow.removeFromLeft(6);
-        learnSceneNextButton.setBounds(controlRow.removeFromLeft(106));
-        controlRow.removeFromLeft(6);
-        learnScenePrevButton.setBounds(controlRow.removeFromLeft(106));
-        controlRow.removeFromLeft(6);
-        clearMapsButton.setBounds(controlRow.removeFromLeft(92));
-        controlRow.removeFromLeft(12);
+        learnBypassButton       .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
+        learnPresetSelectButton .setBounds(controlRow.removeFromLeft(120)); controlRow.removeFromLeft(5);
+        learnExprButton         .setBounds(controlRow.removeFromLeft(120)); controlRow.removeFromLeft(5);
+        learnSceneNextButton    .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
+        learnScenePrevButton    .setBounds(controlRow.removeFromLeft(100)); controlRow.removeFromLeft(5);
+        clearMapsButton         .setBounds(controlRow.removeFromLeft(88));  controlRow.removeFromLeft(10);
         controlLabel.setBounds(controlRow);
     }
     area.removeFromBottom(gap);
@@ -314,12 +316,22 @@ void MainComponent::resized()
 
     {
         auto in = chainPanel.reduced(12);
+
+        // Header row: "SIGNAL CHAIN" label + Save/Load preset buttons.
         auto headRow = in.removeFromTop(28);
         loadPresetButton.setBounds(headRow.removeFromRight(78));
         headRow.removeFromRight(6);
         savePresetButton.setBounds(headRow.removeFromRight(78));
         chainLabel.setBounds(headRow.withTrimmedTop(4));
-        in.removeFromTop(6);
+        in.removeFromTop(4);
+
+        // Section-add strip: "+ Stomp"  "+ Preset"
+        auto sectionRow = in.removeFromTop(28);
+        addSectionStompButton .setBounds(sectionRow.removeFromLeft(72));
+        sectionRow.removeFromLeft(6);
+        addSectionPresetButton.setBounds(sectionRow.removeFromLeft(72));
+        in.removeFromTop(4);
+
         chainListBox.setBounds(in);
     }
 }
@@ -346,12 +358,24 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &prevSceneButton)    { stepScene(-1);         return; }
     if (button == &nextSceneButton)    { stepScene(+1);         return; }
 
+    if (button == &addSectionStompButton)  { addSectionOfType(PluginChain::SectionDef::Type::stomp);  return; }
+    if (button == &addSectionPresetButton) { addSectionOfType(PluginChain::SectionDef::Type::preset); return; }
+
     if (button == &learnBypassButton)
     {
-        armActionLearn({ ControlAction::Type::toggleBypass, juce::jmax(0, getSelectedChainRow()) });
+        armActionLearn({ ControlAction::Type::toggleBypass, rowToSlotIndex(juce::jmax(0, getSelectedChainRow())) });
         return;
     }
-    if (button == &learnExprButton)    { armExpressionLearn(juce::jmax(0, getSelectedChainRow()), 0); return; }
+    if (button == &learnPresetSelectButton)
+    {
+        armActionLearn({ ControlAction::Type::activatePresetSlot, rowToSlotIndex(juce::jmax(0, getSelectedChainRow())) });
+        return;
+    }
+    if (button == &learnExprButton)
+    {
+        armExpressionLearn(rowToSlotIndex(juce::jmax(0, getSelectedChainRow())), 0);
+        return;
+    }
     if (button == &learnSceneNextButton) { armActionLearn({ ControlAction::Type::nextScene, 0 }); return; }
     if (button == &learnScenePrevButton) { armActionLearn({ ControlAction::Type::prevScene, 0 }); return; }
     if (button == &clearMapsButton)    { clearMappings();     return; }
@@ -449,6 +473,10 @@ void MainComponent::executeAction(const ControlAction& action)
             toggleBypassAt(action.index);
             break;
 
+        case ControlAction::Type::activatePresetSlot:
+            activatePresetSlotAt(action.index);
+            break;
+
         case ControlAction::Type::nextScene:  stepScene(+1);            break;
         case ControlAction::Type::prevScene:  stepScene(-1);            break;
         case ControlAction::Type::loadScene:  recallScene(action.index); break;
@@ -462,7 +490,7 @@ void MainComponent::executeAction(const ControlAction& action)
 void MainComponent::captureScene()
 {
     const auto name = "Scene " + juce::String(sceneManager.getNumScenes() + 1);
-    const int idx = sceneManager.addScene(name, pluginHost.captureChain());
+    const int idx = sceneManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs());
     sceneManager.setCurrentIndex(idx);
     refreshSceneSelector();
     saveScenes();
@@ -477,7 +505,7 @@ void MainComponent::updateScene()
     if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
         return;
 
-    sceneManager.replaceScene(idx, pluginHost.captureChain());
+    sceneManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs());
     saveScenes();
     setSceneDirty(false);
     HostDebug::log("Scene updated: index " + juce::String(idx));
@@ -537,7 +565,8 @@ void MainComponent::recallScene(int index)
         return;
 
     sceneManager.setCurrentIndex(index);
-    pluginHost.switchChainWithCrossfade(sceneManager.getScene(index).specs, 25);
+    const auto& scene = sceneManager.getScene(index);
+    pluginHost.switchChainWithCrossfade(scene.specs, scene.sections, 25);
     refreshChainList();
     refreshSceneSelector();
     setSceneDirty(false);
@@ -714,13 +743,52 @@ void MainComponent::refreshPaletteList()
 
 void MainComponent::refreshChainList()
 {
-    const int selected = chainListBox.getSelectedRow();
+    const int selectedRow = chainListBox.getSelectedRow();
 
-    chainModel.setInfos(pluginHost.getSlotInfos());
+    const auto sections  = pluginHost.getSectionDefs();
+    const auto slotInfos = pluginHost.getSlotInfos();
+    const int  lastSecIdx = sections.size() - 1;
+
+    juce::Array<ChainRow> rows;
+
+    for (int si = 0; si < sections.size(); ++si)
+    {
+        const auto& sec = sections.getReference(si);
+
+        // Section header row.
+        ChainRow header;
+        header.kind          = ChainRow::Kind::sectionHeader;
+        header.sectionId     = sec.id;
+        header.sectionName   = sec.name;
+        header.sectionType   = sec.type;
+        header.isFirstSection = (si == 0);
+        header.isLastSection  = (si == lastSecIdx);
+        rows.add(header);
+
+        // Collect slot indices belonging to this section (preserving flat-list order).
+        juce::Array<int> slotIndices;
+        for (int i = 0; i < slotInfos.size(); ++i)
+            if (slotInfos.getReference(i).sectionId == sec.id)
+                slotIndices.add(i);
+
+        for (int j = 0; j < slotIndices.size(); ++j)
+        {
+            const int absIdx = slotIndices[j];
+            ChainRow slot;
+            slot.kind             = ChainRow::Kind::slot;
+            slot.slotInfo         = slotInfos.getReference(absIdx);
+            slot.slotIndex        = absIdx;
+            slot.isFirstInSection = (j == 0);
+            slot.isLastInSection  = (j == slotIndices.size() - 1);
+            rows.add(slot);
+        }
+    }
+
+    chainModel.setRows(rows);
     chainListBox.updateContent();
 
-    if (juce::isPositiveAndBelow(selected, chainModel.getInfos().size()))
-        chainListBox.selectRow(selected, juce::dontSendNotification);
+    if (juce::isPositiveAndBelow(selectedRow, rows.size()))
+        chainListBox.selectRow(selectedRow, juce::dontSendNotification);
 
     chainListBox.repaint();
 }
@@ -735,6 +803,31 @@ int MainComponent::getSelectedChainRow() const
     return chainListBox.getSelectedRow();
 }
 
+int MainComponent::rowToSlotIndex(int row) const
+{
+    const auto& rows = chainModel.getRows();
+    if (juce::isPositiveAndBelow(row, rows.size())
+        && rows.getReference(row).kind == ChainRow::Kind::slot)
+        return rows.getReference(row).slotIndex;
+    return -1;
+}
+
+int MainComponent::getTargetSectionId() const
+{
+    const int row = chainListBox.getSelectedRow();
+    const auto& rows = chainModel.getRows();
+
+    if (juce::isPositiveAndBelow(row, rows.size()))
+    {
+        const auto& r = rows.getReference(row);
+        if (r.kind == ChainRow::Kind::sectionHeader) return r.sectionId;
+        if (r.kind == ChainRow::Kind::slot)          return r.slotInfo.sectionId;
+    }
+
+    const auto secs = pluginHost.getSectionDefs();
+    return secs.isEmpty() ? 1 : secs.getLast().id;
+}
+
 void MainComponent::addSelectedToChain()
 {
     const auto row = getSelectedPaletteRow();
@@ -747,70 +840,160 @@ void MainComponent::addSelectedToChain()
     }
 
     const auto description = types[row];
-    HostDebug::log("UI: Add to chain — " + description.name);
+    const int  sectionId   = getTargetSectionId();
+    HostDebug::log("UI: Add to chain — " + description.name + " (section=" + juce::String(sectionId) + ")");
 
-    if (pluginHost.addPlugin(description))
+    if (pluginHost.addPlugin(description, sectionId))
     {
         refreshChainList();
-        chainListBox.selectRow(pluginHost.getNumSlots() - 1);
 
         if (sceneManager.getCurrentIndex() >= 0)
             setSceneDirty(true);
     }
 }
 
-void MainComponent::moveSlotAt(int row, int delta)
+void MainComponent::moveSlotAt(int fromSlotIndex, int toSlotIndex, int sectionIdOverride)
 {
-    const auto target = row + delta;
-
-    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots())
-        || ! juce::isPositiveAndBelow(target, pluginHost.getNumSlots()))
+    const int n = pluginHost.getNumSlots();
+    if (! juce::isPositiveAndBelow(fromSlotIndex, n))
         return;
 
-    pluginHost.movePlugin(row, target);
+    // toSlotIndex may equal n when dropping into an empty last section (append case).
+    const int clampedTo = juce::jlimit(0, juce::jmax(0, n - 1), toSlotIndex);
+    pluginHost.movePlugin(fromSlotIndex, clampedTo, sectionIdOverride);
     refreshChainList();
-    chainListBox.selectRow(target);
 
     if (sceneManager.getCurrentIndex() >= 0)
         setSceneDirty(true);
 }
 
-void MainComponent::toggleBypassAt(int row)
+void MainComponent::toggleBypassAt(int slotIndex)
 {
-    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+    if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
         return;
 
     const auto infos = pluginHost.getSlotInfos();
-    pluginHost.setBypass(row, ! infos.getReference(row).bypassed);
-    refreshChainList();
-    chainListBox.selectRow(row);
+    const auto& info = infos.getReference(slotIndex);
 
-    if (sceneManager.getCurrentIndex() >= 0)
-        setSceneDirty(true);
+    if (info.isPreset)
+    {
+        if (! info.bypassed)
+            return;   // already the active preset slot — no-op
+        activatePresetSlotAt(slotIndex);
+    }
+    else
+    {
+        pluginHost.setBypass(slotIndex, ! info.bypassed);
+        refreshChainList();
+
+        if (sceneManager.getCurrentIndex() >= 0)
+            setSceneDirty(true);
+    }
 }
 
-void MainComponent::removeSlotAt(int row)
+void MainComponent::activatePresetSlotAt(int slotIndex)
 {
-    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+    if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
         return;
 
-    HostDebug::log("UI: Remove chain slot " + juce::String(row));
-    pluginHost.removePlugin(row);
+    pluginHost.activatePresetSlot(slotIndex);
     refreshChainList();
 
     if (sceneManager.getCurrentIndex() >= 0)
         setSceneDirty(true);
 }
 
-void MainComponent::openEditorAt(int row)
+void MainComponent::removeSlotAt(int slotIndex)
 {
-    if (! juce::isPositiveAndBelow(row, pluginHost.getNumSlots()))
+    if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
+        return;
+
+    HostDebug::log("UI: Remove chain slot " + juce::String(slotIndex));
+    pluginHost.removePlugin(slotIndex);
+    refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
+}
+
+void MainComponent::openEditorAt(int slotIndex)
+{
+    if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
     {
-        HostDebug::log("UI: Open editor — invalid slot " + juce::String(row));
+        HostDebug::log("UI: Open editor — invalid slot " + juce::String(slotIndex));
         return;
     }
 
-    pluginHost.openEditorWindow(row);
+    pluginHost.openEditorWindow(slotIndex);
+}
+
+void MainComponent::addSectionOfType(PluginChain::SectionDef::Type type)
+{
+    pluginHost.addSection(type);
+    refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
+}
+
+void MainComponent::removeSectionAt(int sectionId)
+{
+    pluginHost.removeSection(sectionId);
+    refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
+}
+
+void MainComponent::renameSectionAt(int sectionId)
+{
+    const auto secs = pluginHost.getSectionDefs();
+    juce::String current;
+    for (const auto& s : secs)
+        if (s.id == sectionId) { current = s.name; break; }
+
+    auto* dialog = new juce::AlertWindow("Rename Section",
+                                         "Enter a new name for this section:",
+                                         juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", current, "Name:");
+    dialog->addButton("OK",     1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [this, sectionId, dialog](int result)
+        {
+            if (result == 1)
+            {
+                const juce::String newName = dialog->getTextEditorContents("name").trim();
+                if (newName.isNotEmpty())
+                {
+                    pluginHost.renameSection(sectionId, newName);
+                    refreshChainList();
+
+                    if (sceneManager.getCurrentIndex() >= 0)
+                        setSceneDirty(true);
+                }
+            }
+            delete dialog;
+        }), true);
+}
+
+void MainComponent::moveSectionUpAt(int sectionId)
+{
+    pluginHost.moveSectionUp(sectionId);
+    refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
+}
+
+void MainComponent::moveSectionDownAt(int sectionId)
+{
+    pluginHost.moveSectionDown(sectionId);
+    refreshChainList();
+
+    if (sceneManager.getCurrentIndex() >= 0)
+        setSceneDirty(true);
 }
 
 void MainComponent::savePreset()
@@ -838,9 +1021,10 @@ void MainComponent::savePreset()
 
         file = file.withFileExtension(Preset::fileExtension);
 
-        const auto specs = pluginHost.captureChain();
+        const auto specs    = pluginHost.captureChain();
+        const auto sections = pluginHost.captureSectionDefs();
 
-        if (Preset::saveToFile(specs, file.getFileNameWithoutExtension(), file))
+        if (Preset::saveToFile(specs, sections, file.getFileNameWithoutExtension(), file))
             saveLastPresetPath(file);
     });
 }
@@ -869,11 +1053,12 @@ void MainComponent::loadPreset()
 void MainComponent::loadPresetFile(const juce::File& file)
 {
     juce::Array<PluginChain::SlotSpec> specs;
+    juce::Array<PluginChain::SectionDef> sections;
 
-    if (! Preset::loadFromFile(file, specs))
+    if (! Preset::loadFromFile(file, specs, sections))
         return;
 
-    pluginHost.switchChainWithCrossfade(specs, 25);   // smooth, click-free preset switch
+    pluginHost.switchChainWithCrossfade(specs, sections, 25);   // smooth, click-free preset switch
     refreshChainList();
     saveLastPresetPath(file);
     HostDebug::log("Preset applied: " + file.getFileName());

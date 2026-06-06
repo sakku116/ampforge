@@ -9,6 +9,7 @@ MainComponent::MainComponent()
     initialiseSettings();
 
     setSize(960, 620);
+    setWantsKeyboardFocus(true);   // receive key presses for keyboard/footswitch mapping
 
     titleLabel.setText("ToneForge - VST3 Pedalboard", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(22.0f, juce::Font::bold));
@@ -169,6 +170,32 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
         return;
 
     juce::MessageManager::callAsync([this, action] { executeAction(action); });
+}
+
+bool MainComponent::keyPressed(const juce::KeyPress& key)
+{
+    const int code = key.getKeyCode();
+
+    if (midiLearnArmed.load())
+    {
+        ControlTrigger trigger;
+        trigger.type = ControlTrigger::Type::key;
+        trigger.number = code;
+
+        const auto action = pendingLearnAction;
+        midiLearnArmed.store(false);
+        controlMap.addBinding({ trigger, action });
+        HostDebug::log("Key learn: bound " + trigger.toString() + " -> " + action.toString());
+        return true;
+    }
+
+    const auto action = controlMap.matchKey(code);
+
+    if (! action.isValid())
+        return false;   // let unhandled keys propagate
+
+    executeAction(action);   // already on the message thread
+    return true;
 }
 
 void MainComponent::executeAction(const ControlAction& action)

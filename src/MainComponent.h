@@ -92,6 +92,7 @@ private:
 
     void buttonClicked(juce::Button* button) override;
     void timerCallback() override;
+    bool keyPressed(const juce::KeyPress& key) override;
 
     void refreshPaletteList();
     void refreshChainList();

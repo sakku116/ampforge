@@ -14,14 +14,19 @@ public:
     {
         juce::String name;
         juce::Array<PluginChain::SlotSpec> specs;
+        juce::Array<PluginChain::SectionDef> sections;
     };
 
     int getNumScenes() const { return (int) scenes.size(); }
     const Scene& getScene(int index) const { return scenes[(size_t) index]; }
     juce::StringArray getSceneNames() const;
 
-    int  addScene(const juce::String& name, juce::Array<PluginChain::SlotSpec> specs);
-    void replaceScene(int index, juce::Array<PluginChain::SlotSpec> specs);
+    int  addScene(const juce::String& name,
+                  juce::Array<PluginChain::SlotSpec> specs,
+                  juce::Array<PluginChain::SectionDef> sections);
+    void replaceScene(int index,
+                      juce::Array<PluginChain::SlotSpec> specs,
+                      juce::Array<PluginChain::SectionDef> sections);
     void renameScene(int index, const juce::String& name);
     void removeScene(int index);
     void clear();

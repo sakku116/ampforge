@@ -9,20 +9,32 @@
     current scan list. */
 namespace Preset
 {
-    /** Builds a ValueTree from a captured chain snapshot. */
+        /** Builds a ValueTree from a captured chain snapshot (version 1, no sections). */
     juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
                                 const juce::String& name);
 
-    /** Parses a ValueTree back into slot specs. Returns false if the tree is not a preset. */
+    /** Builds a ValueTree including section definitions (version 2). */
+    juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
+                                const juce::Array<PluginChain::SectionDef>& sections,
+                                const juce::String& name);
+
+    /** Parses a ValueTree back into slot specs (version 1 compat). Returns false if not a preset. */
     bool fromValueTree(const juce::ValueTree& tree,
                        juce::Array<PluginChain::SlotSpec>& outSpecs);
 
+    /** Parses a ValueTree into slot specs + section defs. Migrates version 1 files automatically. */
+    bool fromValueTree(const juce::ValueTree& tree,
+                       juce::Array<PluginChain::SlotSpec>& outSpecs,
+                       juce::Array<PluginChain::SectionDef>& outSections);
+
     bool saveToFile(const juce::Array<PluginChain::SlotSpec>& specs,
+                    const juce::Array<PluginChain::SectionDef>& sections,
                     const juce::String& name,
                     const juce::File& file);
 
     bool loadFromFile(const juce::File& file,
-                      juce::Array<PluginChain::SlotSpec>& outSpecs);
+                      juce::Array<PluginChain::SlotSpec>& outSpecs,
+                      juce::Array<PluginChain::SectionDef>& outSections);
 
     /** %APPDATA%/GtrFxSim/presets (created on demand). */
     juce::File getPresetsDirectory();

@@ -127,6 +127,7 @@ private:
     // Scenes (Phase 4.5)
     void captureScene();
     void updateScene();
+    void renameCurrentScene();
     void deleteScene();
     void recallScene(int index);
     void stepScene(int delta);
@@ -163,11 +164,13 @@ private:
     juce::TextButton addButton           { "+ Add to Chain" };
     juce::TextButton savePresetButton    { "Save" };
     juce::TextButton loadPresetButton    { "Load" };
-    juce::TextButton captureSceneButton  { "Capture" };
-    juce::TextButton updateSceneButton   { "Update" };
-    juce::TextButton deleteSceneButton   { "Delete" };
-    juce::TextButton prevSceneButton     { "< Prev" };
-    juce::TextButton nextSceneButton     { "Next >" };
+    juce::TextButton captureSceneButton;
+    juce::TextButton updateSceneButton;
+    juce::TextButton renameSceneButton;
+    juce::TextButton deleteSceneButton;
+    juce::TextButton prevSceneButton;
+    juce::TextButton nextSceneButton;
+    juce::TooltipWindow tooltipWindow { this, 600 };
     juce::ComboBox   sceneSelector;
     juce::Label      sceneDirtyLabel;   // "●" shown when current chain differs from active scene
 

@@ -89,10 +89,25 @@ MainComponent::MainComponent()
         setSceneDirty(sceneManager.getCurrentIndex() >= 0);
     };
 
+    // Scene action buttons: icon text + tooltip so their purpose is clear at a glance.
+    captureSceneButton.setButtonText(juce::String::fromUTF8("\xE2\x8A\x95"));   // ⊕
+    updateSceneButton .setButtonText(juce::String::fromUTF8("\xE2\x86\x91"));   // ↑
+    renameSceneButton .setButtonText(juce::String::fromUTF8("\xE2\x9C\x8E"));   // ✎
+    deleteSceneButton .setButtonText(juce::String::fromUTF8("\xE2\x9C\x95"));   // ✕
+    prevSceneButton   .setButtonText(juce::String::fromUTF8("\xE2\x97\x80"));   // ◀
+    nextSceneButton   .setButtonText(juce::String::fromUTF8("\xE2\x96\xB6"));   // ▶
+
+    captureSceneButton.setTooltip("Capture — save current chain as a new scene");
+    updateSceneButton .setTooltip("Update — overwrite active scene with current chain");
+    renameSceneButton .setTooltip("Rename — change the name of the active scene");
+    deleteSceneButton .setTooltip("Delete — remove the active scene");
+    prevSceneButton   .setTooltip("Previous scene");
+    nextSceneButton   .setTooltip("Next scene");
+
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
                      &savePresetButton, &loadPresetButton,
-                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
-                     &prevSceneButton, &nextSceneButton,
+                     &captureSceneButton, &updateSceneButton, &renameSceneButton,
+                     &deleteSceneButton, &prevSceneButton, &nextSceneButton,
                      &learnBypassButton, &learnExprButton, &learnSceneNextButton,
                      &learnScenePrevButton, &clearMapsButton })
     {
@@ -103,7 +118,9 @@ MainComponent::MainComponent()
     // Primary action stands out; destructive actions read as danger.
     addButton.setColour(juce::TextButton::buttonColourId, tf::colour::accent);
     addButton.setColour(juce::TextButton::textColourOffId, juce::Colours::black);
-    deleteSceneButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
+    captureSceneButton.setColour(juce::TextButton::textColourOffId, tf::colour::accent);
+    renameSceneButton .setColour(juce::TextButton::textColourOffId, tf::colour::textDim);
+    deleteSceneButton .setColour(juce::TextButton::textColourOffId, tf::colour::danger);
     clearMapsButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
 
     sceneSelector.setTextWhenNothingSelected("(no scenes)");
@@ -170,8 +187,8 @@ MainComponent::~MainComponent()
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
                      &savePresetButton, &loadPresetButton,
-                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
-                     &prevSceneButton, &nextSceneButton,
+                     &captureSceneButton, &updateSceneButton, &renameSceneButton,
+                     &deleteSceneButton, &prevSceneButton, &nextSceneButton,
                      &learnBypassButton, &learnExprButton, &learnSceneNextButton,
                      &learnScenePrevButton, &clearMapsButton })
         b->removeListener(this);
@@ -246,17 +263,21 @@ void MainComponent::resized()
         auto sceneRow = f.removeFromTop(rowH);
         sceneLabel.setBounds(sceneRow.removeFromLeft(70));
         sceneSelector.setBounds(sceneRow.removeFromLeft(200));
+        sceneRow.removeFromLeft(8);
+        sceneDirtyLabel.setBounds(sceneRow.removeFromLeft(88));
         sceneRow.removeFromLeft(6);
-        sceneDirtyLabel.setBounds(sceneRow.removeFromLeft(82));
-        sceneRow.removeFromLeft(4);
-        captureSceneButton.setBounds(sceneRow.removeFromLeft(92));
-        sceneRow.removeFromLeft(6);
-        updateSceneButton.setBounds(sceneRow.removeFromLeft(86));
-        sceneRow.removeFromLeft(6);
-        deleteSceneButton.setBounds(sceneRow.removeFromLeft(86));
-        nextSceneButton.setBounds(sceneRow.removeFromRight(72));
-        sceneRow.removeFromRight(6);
-        prevSceneButton.setBounds(sceneRow.removeFromRight(72));
+
+        // Icon buttons: ⊕ capture  ↑ update  ✎ rename  ✕ delete  |  ◀ prev  ▶ next
+        for (auto* b : { &captureSceneButton, &updateSceneButton,
+                         &renameSceneButton,  &deleteSceneButton })
+        {
+            b->setBounds(sceneRow.removeFromLeft(34));
+            sceneRow.removeFromLeft(4);
+        }
+
+        nextSceneButton.setBounds(sceneRow.removeFromRight(34));
+        sceneRow.removeFromRight(4);
+        prevSceneButton.setBounds(sceneRow.removeFromRight(34));
 
         f.removeFromTop(8);
 
@@ -318,11 +339,12 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &addButton)    { addSelectedToChain();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
-    if (button == &captureSceneButton) { captureScene();      return; }
-    if (button == &updateSceneButton)  { updateScene();       return; }
-    if (button == &deleteSceneButton)  { deleteScene();       return; }
-    if (button == &prevSceneButton)    { stepScene(-1);       return; }
-    if (button == &nextSceneButton)    { stepScene(+1);       return; }
+    if (button == &captureSceneButton) { captureScene();        return; }
+    if (button == &updateSceneButton)  { updateScene();         return; }
+    if (button == &renameSceneButton)  { renameCurrentScene();  return; }
+    if (button == &deleteSceneButton)  { deleteScene();         return; }
+    if (button == &prevSceneButton)    { stepScene(-1);         return; }
+    if (button == &nextSceneButton)    { stepScene(+1);         return; }
 
     if (button == &learnBypassButton)
     {
@@ -459,6 +481,40 @@ void MainComponent::updateScene()
     saveScenes();
     setSceneDirty(false);
     HostDebug::log("Scene updated: index " + juce::String(idx));
+}
+
+void MainComponent::renameCurrentScene()
+{
+    const int idx = sceneManager.getCurrentIndex();
+
+    if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
+        return;
+
+    const juce::String current = sceneManager.getScene(idx).name;
+
+    auto* dialog = new juce::AlertWindow("Rename Scene",
+                                         "Enter a new name for this scene:",
+                                         juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", current, "Name:");
+    dialog->addButton("OK",     1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [this, idx, dialog](int result)
+        {
+            if (result == 1)
+            {
+                const juce::String newName = dialog->getTextEditorContents("name").trim();
+                if (newName.isNotEmpty())
+                {
+                    sceneManager.renameScene(idx, newName);
+                    refreshSceneSelector();
+                    saveScenes();
+                    HostDebug::log("Scene renamed: index " + juce::String(idx) + " -> \"" + newName + "\"");
+                }
+            }
+            delete dialog;
+        }), true);
 }
 
 void MainComponent::deleteScene()

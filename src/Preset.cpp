@@ -10,8 +10,9 @@ namespace
     const juce::Identifier pluginTag   ("PLUGIN");   // tag produced by PluginDescription::createXml()
     const juce::Identifier propName    ("name");
     const juce::Identifier propVersion ("version");
-    const juce::Identifier propBypassed("bypassed");
-    const juce::Identifier propState   ("state");
+    const juce::Identifier propBypassed   ("bypassed");
+    const juce::Identifier propState      ("state");
+    const juce::Identifier propCustomName ("customName");
 }
 
 juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs, const juce::String& name)
@@ -24,6 +25,9 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs, con
     {
         juce::ValueTree slot(slotType);
         slot.setProperty(propBypassed, spec.bypassed, nullptr);
+
+        if (spec.customName.isNotEmpty())
+            slot.setProperty(propCustomName, spec.customName, nullptr);
 
         if (spec.state.getSize() > 0)
             slot.setProperty(propState, spec.state.toBase64Encoding(), nullptr);
@@ -52,7 +56,8 @@ bool fromValueTree(const juce::ValueTree& tree, juce::Array<PluginChain::SlotSpe
             continue;
 
         PluginChain::SlotSpec spec;
-        spec.bypassed = (bool) slot.getProperty(propBypassed, false);
+        spec.bypassed    = (bool) slot.getProperty(propBypassed, false);
+        spec.customName  = slot.getProperty(propCustomName, juce::String()).toString();
 
         const auto stateStr = slot.getProperty(propState, juce::String()).toString();
         if (stateStr.isNotEmpty())

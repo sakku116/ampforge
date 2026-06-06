@@ -16,6 +16,8 @@ public:
     std::function<void(int)> onRemove;
     std::function<void(int)> onEditor;
     std::function<void(int)> onSelect;
+    std::function<void(int)> onRename;
+    std::function<void(int)> onResetName;
 
     void setInfos(juce::Array<PluginChain::SlotInfo> newInfos) { infos = std::move(newInfos); }
     const juce::Array<PluginChain::SlotInfo>& getInfos() const { return infos; }
@@ -46,7 +48,8 @@ private:
     int  row = -1;
     bool selected = false;
     bool bypassed = false;
-    juce::String name, format;
+    bool hasCustomName = false;
+    juce::String name, originalName, format;
     juce::Rectangle<int> textArea;
 
     juce::TextButton bypassButton, upButton, downButton, editorButton, removeButton;

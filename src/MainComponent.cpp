@@ -45,12 +45,49 @@ MainComponent::MainComponent()
     // Double-click a library item to add it; the chain rows carry their own buttons.
     paletteModel.onDoubleClick = [this](int) { addSelectedToChain(); };
 
-    chainModel.onBypass   = [this](int r) { toggleBypassAt(r); };
+    chainModel.onBypass    = [this](int r) { toggleBypassAt(r); };
     chainModel.onMoveUp   = [this](int r) { moveSlotAt(r, -1); };
     chainModel.onMoveDown = [this](int r) { moveSlotAt(r, +1); };
     chainModel.onRemove   = [this](int r) { removeSlotAt(r); };
     chainModel.onEditor   = [this](int r) { openEditorAt(r); };
     chainModel.onSelect   = [this](int r) { chainListBox.selectRow(r); };
+
+    chainModel.onRename = [this](int r)
+    {
+        const auto infos = pluginHost.getSlotInfos();
+        if (! juce::isPositiveAndBelow(r, infos.size()))
+            return;
+
+        const auto& info = infos.getReference(r);
+        const juce::String current = info.hasCustomName ? info.name : juce::String{};
+
+        auto* dialog = new juce::AlertWindow("Rename Slot",
+                                             "Enter a new name for \"" + info.originalName + "\":",
+                                             juce::MessageBoxIconType::NoIcon);
+        dialog->addTextEditor("name", current, "Name:");
+        dialog->addButton("OK",     1, juce::KeyPress(juce::KeyPress::returnKey));
+        dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+        dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+            [this, r, dialog](int result)
+            {
+                if (result == 1)
+                {
+                    const juce::String newName = dialog->getTextEditorContents("name").trim();
+                    pluginHost.renameSlot(r, newName);
+                    refreshChainList();
+                    setSceneDirty(sceneManager.getCurrentIndex() >= 0);
+                }
+                delete dialog;
+            }), true);
+    };
+
+    chainModel.onResetName = [this](int r)
+    {
+        pluginHost.renameSlot(r, {});
+        refreshChainList();
+        setSceneDirty(sceneManager.getCurrentIndex() >= 0);
+    };
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton,
                      &savePresetButton, &loadPresetButton,

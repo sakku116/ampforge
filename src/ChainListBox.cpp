@@ -64,9 +64,11 @@ void ChainSlotComponent::update(int newRow, bool isSelected)
     if (juce::isPositiveAndBelow(row, infos.size()))
     {
         const auto& info = infos.getReference(row);
-        name     = info.name;
-        format   = info.format;
-        bypassed = info.bypassed;
+        name         = info.name;
+        originalName = info.originalName;
+        format       = info.format;
+        bypassed     = info.bypassed;
+        hasCustomName = info.hasCustomName;
 
         // Bypass toggle reads as an "active/engaged" pill: accent when ON, dim when bypassed.
         bypassButton.setToggleState(! bypassed, juce::dontSendNotification);
@@ -94,10 +96,28 @@ void ChainSlotComponent::resized()
     textArea = area;   // remaining left area is painted (index badge + name/format)
 }
 
-void ChainSlotComponent::mouseDown(const juce::MouseEvent&)
+void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
 {
     if (model.onSelect)
         model.onSelect(row);
+
+    if (e.mods.isRightButtonDown())
+    {
+        juce::PopupMenu menu;
+        menu.addItem(1, "Rename");
+
+        if (hasCustomName)
+            menu.addItem(2, "Reset Name");
+
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+            [this](int result)
+            {
+                if (result == 1 && model.onRename)
+                    model.onRename(row);
+                else if (result == 2 && model.onResetName)
+                    model.onResetName(row);
+            });
+    }
 }
 
 void ChainSlotComponent::paint(juce::Graphics& g)
@@ -125,7 +145,9 @@ void ChainSlotComponent::paint(juce::Graphics& g)
 
     a.removeFromLeft(8);
 
-    // Name (bold) + format (dim, below).
+    // Name (bold) + sub line (dim, below).
+    // Sub line: when renamed → "[VST3] original plugin name" [+ " bypassed"]
+    //           otherwise    → "[VST3]" [+ " bypassed"]
     auto nameArea = a.removeFromTop(a.getHeight() / 2 + 2);
 
     g.setColour(bypassed ? tf::colour::textDim : tf::colour::text);
@@ -135,6 +157,8 @@ void ChainSlotComponent::paint(juce::Graphics& g)
     g.setColour(tf::colour::textDim);
     g.setFont(juce::FontOptions(11.5f));
     juce::String sub = "[" + format + "]";
+    if (hasCustomName)
+        sub += "  " + originalName;
     if (bypassed)
         sub += "   bypassed";
     g.drawText(sub, a, juce::Justification::topLeft);

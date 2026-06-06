@@ -20,9 +20,11 @@ class PluginChain
 public:
     struct SlotInfo
     {
-        juce::String name;
+        juce::String name;        // display name (customName if set, otherwise plugin name)
+        juce::String originalName; // always the plugin's own name
         juce::String format;
         bool bypassed = false;
+        bool hasCustomName = false;
     };
 
     struct SlotSpec
@@ -30,6 +32,7 @@ public:
         juce::PluginDescription description;
         juce::MemoryBlock state;   // AudioPluginInstance::getStateInformation payload (may be empty)
         bool bypassed = false;
+        juce::String customName;   // empty = use plugin's own name
     };
 
     explicit PluginChain(juce::AudioPluginFormatManager& formatManager);
@@ -40,6 +43,8 @@ public:
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex);
     void setBypass(int index, bool shouldBypass);
+    /** Sets a user-visible display name on a slot. Empty string resets to plugin's own name. */
+    void renameSlot(int index, const juce::String& newName);
     void clear();
     bool rebuildFrom(const juce::Array<SlotSpec>& specs);
 
@@ -77,6 +82,7 @@ private:
         std::unique_ptr<juce::AudioPluginInstance> instance;
         std::atomic<bool> bypassed { false };
         juce::PluginDescription description;
+        juce::String customName;   // empty = use instance->getName(). Message-thread only.
     };
 
     using SlotList = std::vector<std::shared_ptr<Slot>>;

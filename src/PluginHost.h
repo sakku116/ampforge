@@ -20,6 +20,7 @@ public:
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex);
     void setBypass(int index, bool shouldBypass);
+    void renameSlot(int index, const juce::String& newName) { chain.renameSlot(index, newName); }
     void clearChain();
 
     int getNumSlots() const { return chain.getNumSlots(); }

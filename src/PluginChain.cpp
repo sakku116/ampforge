@@ -192,6 +192,15 @@ void PluginChain::setBypass(int index, bool shouldBypass)
         (*cur)[(size_t) index]->bypassed.store(shouldBypass);   // atomic flag; no republish needed
 }
 
+void PluginChain::renameSlot(int index, const juce::String& newName)
+{
+    const juce::ScopedLock sl(editLock);
+    auto cur = currentList();
+
+    if (juce::isPositiveAndBelow(index, (int) cur->size()))
+        (*cur)[(size_t) index]->customName = newName;   // message-thread only; no republish needed
+}
+
 void PluginChain::clear()
 {
     const juce::ScopedLock sl(editLock);
@@ -219,6 +228,7 @@ std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<
             slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
 
         slot->bypassed.store(spec.bypassed);
+        slot->customName = spec.customName;
         list->push_back(std::move(slot));
     }
 
@@ -320,8 +330,10 @@ juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
     for (const auto& slot : *cur)
     {
         SlotInfo info;
-        info.name = slot->instance != nullptr ? slot->instance->getName() : slot->description.name;
-        info.format = slot->description.pluginFormatName;
+        info.originalName = slot->instance != nullptr ? slot->instance->getName() : slot->description.name;
+        info.hasCustomName = slot->customName.isNotEmpty();
+        info.name     = info.hasCustomName ? slot->customName : info.originalName;
+        info.format   = slot->description.pluginFormatName;
         info.bypassed = slot->bypassed.load();
         infos.add(info);
     }
@@ -359,7 +371,8 @@ juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 
         SlotSpec spec;
         spec.description = slot->description;
-        spec.bypassed = slot->bypassed.load();
+        spec.bypassed    = slot->bypassed.load();
+        spec.customName  = slot->customName;
         slot->instance->getStateInformation(spec.state);
         specs.add(spec);
     }

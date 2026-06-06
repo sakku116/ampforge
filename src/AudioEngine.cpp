@@ -87,7 +87,19 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     }
 
     midiBuffer.clear();
+
+    const auto startTicks = juce::Time::getHighResolutionTicks();
     pluginHost.processAudio(processingBuffer, midiBuffer);
+    const auto elapsedSeconds = juce::Time::highResolutionTicksToSeconds(
+        juce::Time::getHighResolutionTicks() - startTicks);
+
+    if (currentSampleRateHz > 0.0)
+    {
+        const double blockSeconds = (double) numSamples / currentSampleRateHz;
+        const double load = blockSeconds > 0.0 ? elapsedSeconds / blockSeconds : 0.0;
+        const double prev = dspLoad.load();
+        dspLoad.store(prev + 0.1 * (load - prev));   // exponential smoothing
+    }
 
     for (int ch = 0; ch < numOutputChannels; ++ch)
     {
@@ -110,6 +122,11 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
                    + " | in ch " + juce::String(device->getActiveInputChannels().countNumberOfSetBits())
                    + " | out ch " + juce::String(device->getActiveOutputChannels().countNumberOfSetBits()));
 
+    currentSampleRateHz = device->getCurrentSampleRate();
+    currentBlockSizeSamples = device->getCurrentBufferSizeSamples();
+    inputLatencySamples = device->getInputLatencyInSamples();
+    outputLatencySamples = device->getOutputLatencyInSamples();
+
     pluginHost.prepare(device->getCurrentSampleRate(),
                        device->getCurrentBufferSizeSamples(),
                        device->getActiveInputChannels().countNumberOfSetBits(),
@@ -119,4 +136,26 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
 void AudioEngine::audioDeviceStopped()
 {
     HostDebug::log("Audio device stopped");
+}
+
+double AudioEngine::getInputLatencyMs() const
+{
+    return currentSampleRateHz > 0.0 ? (double) inputLatencySamples / currentSampleRateHz * 1000.0 : 0.0;
+}
+
+double AudioEngine::getOutputLatencyMs() const
+{
+    return currentSampleRateHz > 0.0 ? (double) outputLatencySamples / currentSampleRateHz * 1000.0 : 0.0;
+}
+
+double AudioEngine::getChainLatencyMs() const
+{
+    return currentSampleRateHz > 0.0
+         ? (double) pluginHost.getChainLatencySamples() / currentSampleRateHz * 1000.0
+         : 0.0;
+}
+
+double AudioEngine::getRoundTripLatencyMs() const
+{
+    return getInputLatencyMs() + getOutputLatencyMs() + getChainLatencyMs();
 }

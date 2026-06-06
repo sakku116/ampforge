@@ -2,19 +2,37 @@
 #include "HostDebug.h"
 #include "PluginScanGuard.h"
 
+#include <algorithm>
+#include <cmath>
+
 PluginChain::PluginChain(juce::AudioPluginFormatManager& manager) : formatManager(manager)
 {
 }
 
 PluginChain::~PluginChain()
 {
-    clear();
+    const juce::ScopedLock sl(editLock);
+    activeList.store(std::make_shared<SlotList>());
+    retired.clear();   // destroys remaining instances on the message thread
 }
 
-std::unique_ptr<PluginChain::Slot> PluginChain::createSlot(const juce::PluginDescription& description,
+int PluginChain::computeChannelCount(const SlotList& list)
+{
+    int maxChannels = 0;
+
+    for (const auto& slot : list)
+        if (slot->instance != nullptr)
+            maxChannels = juce::jmax(maxChannels,
+                                     slot->instance->getTotalNumInputChannels(),
+                                     slot->instance->getTotalNumOutputChannels());
+
+    return maxChannels;
+}
+
+std::shared_ptr<PluginChain::Slot> PluginChain::createSlot(const juce::PluginDescription& description,
                                                           juce::String& error)
 {
-    // Created outside the lock — instance creation hits disk and can be slow.
+    // Built outside the lock — instance creation hits disk and can be slow.
     auto outcome = PluginScanGuard::createPluginInstance(formatManager,
                                                          description,
                                                          currentSampleRate,
@@ -32,7 +50,7 @@ std::unique_ptr<PluginChain::Slot> PluginChain::createSlot(const juce::PluginDes
         return nullptr;
     }
 
-    auto slot = std::make_unique<Slot>();
+    auto slot = std::make_shared<Slot>();
     slot->instance = std::move(outcome.instance);
     slot->description = description;
     prepareSlot(*slot);
@@ -50,17 +68,55 @@ void PluginChain::prepareSlot(Slot& slot)
     slot.instance->prepareToPlay(currentSampleRate, currentBlockSize);
 }
 
-void PluginChain::updateProcessingChannelCount()
+void PluginChain::publish(std::shared_ptr<SlotList> next)
 {
-    int maxChannels = 0;
+    processingChannelCount.store(computeChannelCount(*next));
 
-    for (auto* slot : slots)
-        if (slot->instance != nullptr)
-            maxChannels = juce::jmax(maxChannels,
-                                     slot->instance->getTotalNumInputChannels(),
-                                     slot->instance->getTotalNumOutputChannels());
+    fadeInList.store(nullptr);   // cancel any in-progress crossfade
 
-    processingChannelCount.store(maxChannels);
+    auto old = activeList.exchange(next);
+
+    if (old != nullptr)
+        retired.push_back(std::move(old));
+
+    reclaimRetired();
+}
+
+void PluginChain::publishWithCrossfade(std::shared_ptr<SlotList> next, int crossfadeMs)
+{
+    processingChannelCount.store(juce::jmax(computeChannelCount(*currentList()),
+                                           computeChannelCount(*next)));
+
+    const int fadeSamples = juce::jmax(1, (int) (crossfadeMs * 0.001 * currentSampleRate));
+
+    // Keep the outgoing list referenced so it is reclaimed on the message thread, not on audio.
+    retired.push_back(activeList.load());
+
+    requestedFadeSamples.store(fadeSamples);
+    transitionEpoch.fetch_add(1);
+    fadeInList.store(next);       // audio thread promotes this to active when the fade completes
+
+    reclaimRetired();
+}
+
+void PluginChain::runList(const SlotList& list, juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    for (const auto& slot : list)
+    {
+        if (slot->bypassed.load())
+            continue;
+
+        slot->instance->processBlock(buffer, midi);
+    }
+}
+
+void PluginChain::reclaimRetired()
+{
+    // Drop old lists the audio thread no longer references (use_count() <= 1 means only
+    // 'retired' holds it), destroying their removed instances here on the message thread.
+    retired.erase(std::remove_if(retired.begin(), retired.end(),
+                                 [](const std::shared_ptr<SlotList>& l) { return l.use_count() <= 1; }),
+                  retired.end());
 }
 
 bool PluginChain::addPlugin(const juce::PluginDescription& description)
@@ -75,68 +131,71 @@ bool PluginChain::addPlugin(const juce::PluginDescription& description)
     }
 
     {
-        juce::ScopedLock sl(lock);
-        slots.add(slot.release());
-        updateProcessingChannelCount();
+        const juce::ScopedLock sl(editLock);
+        auto next = std::make_shared<SlotList>(*currentList());
+        next->push_back(std::move(slot));
+        publish(next);
+        HostDebug::log("Chain add OK: " + description.name + " (slots=" + juce::String((int) next->size()) + ")");
     }
 
-    HostDebug::log("Chain add OK: " + description.name
-                   + " (slots=" + juce::String(slots.size()) + ")");
     return true;
 }
 
 void PluginChain::removePlugin(int index)
 {
-    juce::ScopedLock sl(lock);
+    const juce::ScopedLock sl(editLock);
+    auto cur = currentList();
 
-    if (! juce::isPositiveAndBelow(index, slots.size()))
+    if (! juce::isPositiveAndBelow(index, (int) cur->size()))
         return;
 
-    if (slots[index]->instance != nullptr)
-        slots[index]->instance->releaseResources();
-
-    slots.remove(index);   // OwnedArray deletes the slot
-    updateProcessingChannelCount();
-    HostDebug::log("Chain remove slot " + juce::String(index) + " (slots=" + juce::String(slots.size()) + ")");
+    auto next = std::make_shared<SlotList>(*cur);
+    next->erase(next->begin() + index);
+    publish(next);
+    HostDebug::log("Chain remove slot " + juce::String(index) + " (slots=" + juce::String((int) next->size()) + ")");
 }
 
 void PluginChain::movePlugin(int fromIndex, int toIndex)
 {
-    juce::ScopedLock sl(lock);
+    const juce::ScopedLock sl(editLock);
+    auto cur = currentList();
+    const int n = (int) cur->size();
 
-    if (! juce::isPositiveAndBelow(fromIndex, slots.size()))
+    if (! juce::isPositiveAndBelow(fromIndex, n))
         return;
 
-    toIndex = juce::jlimit(0, slots.size() - 1, toIndex);
-    slots.move(fromIndex, toIndex);
+    toIndex = juce::jlimit(0, n - 1, toIndex);
+
+    if (toIndex == fromIndex)
+        return;
+
+    auto next = std::make_shared<SlotList>(*cur);
+    auto slot = (*next)[(size_t) fromIndex];
+    next->erase(next->begin() + fromIndex);
+    next->insert(next->begin() + toIndex, slot);
+    publish(next);
     HostDebug::log("Chain move " + juce::String(fromIndex) + " -> " + juce::String(toIndex));
 }
 
 void PluginChain::setBypass(int index, bool shouldBypass)
 {
-    juce::ScopedLock sl(lock);
+    const juce::ScopedLock sl(editLock);
+    auto cur = currentList();
 
-    if (juce::isPositiveAndBelow(index, slots.size()))
-        slots[index]->bypassed.store(shouldBypass);
+    if (juce::isPositiveAndBelow(index, (int) cur->size()))
+        (*cur)[(size_t) index]->bypassed.store(shouldBypass);   // atomic flag; no republish needed
 }
 
 void PluginChain::clear()
 {
-    juce::ScopedLock sl(lock);
-
-    for (auto* slot : slots)
-        if (slot->instance != nullptr)
-            slot->instance->releaseResources();
-
-    slots.clear();
-    processingChannelCount.store(0);
+    const juce::ScopedLock sl(editLock);
+    publish(std::make_shared<SlotList>());
 }
 
-bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
+std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<SlotSpec>& specs, bool& allOk)
 {
-    // Build all instances first (outside the lock), then swap them in atomically.
-    juce::OwnedArray<Slot> newSlots;
-    bool allOk = true;
+    auto list = std::make_shared<SlotList>();
+    allOk = true;
 
     for (const auto& spec : specs)
     {
@@ -145,7 +204,7 @@ bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
 
         if (slot == nullptr)
         {
-            HostDebug::log("Chain rebuild: slot FAILED " + spec.description.name + " — " + error);
+            HostDebug::log("Chain build: slot FAILED " + spec.description.name + " — " + error);
             allOk = false;
             continue;
         }
@@ -154,37 +213,105 @@ bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
             slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
 
         slot->bypassed.store(spec.bypassed);
-        newSlots.add(slot.release());
+        list->push_back(std::move(slot));
     }
+
+    return list;
+}
+
+bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
+{
+    bool allOk = false;
+    auto next = buildList(specs, allOk);
 
     {
-        juce::ScopedLock sl(lock);
-
-        for (auto* slot : slots)
-            if (slot->instance != nullptr)
-                slot->instance->releaseResources();
-
-        slots.clear();
-        slots.swapWith(newSlots);
-        updateProcessingChannelCount();
+        const juce::ScopedLock sl(editLock);
+        publish(next);
     }
 
-    HostDebug::log("Chain rebuilt: " + juce::String(slots.size()) + " slot(s), allOk=" + juce::String((int) allOk));
+    HostDebug::log("Chain rebuilt: " + juce::String((int) next->size()) + " slot(s), allOk=" + juce::String((int) allOk));
     return allOk;
+}
+
+bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs)
+{
+    bool allOk = false;
+    auto next = buildList(specs, allOk);   // built outside the lock
+
+    {
+        const juce::ScopedLock sl(editLock);
+
+        if (crossfadeMs <= 0)
+            publish(next);
+        else
+            publishWithCrossfade(next, crossfadeMs);
+    }
+
+    HostDebug::log("Chain switch (crossfade " + juce::String(crossfadeMs) + " ms): "
+                   + juce::String((int) next->size()) + " slot(s)");
+    return allOk;
+}
+
+int PluginChain::preloadChain(const juce::Array<SlotSpec>& specs)
+{
+    bool allOk = false;
+    auto list = buildList(specs, allOk);   // built outside the lock
+
+    const juce::ScopedLock sl(editLock);
+    const int handle = nextPreloadHandle++;
+    preloaded[handle] = list;
+    HostDebug::log("Preloaded chain handle=" + juce::String(handle)
+                   + " (" + juce::String((int) list->size()) + " slots, allOk=" + juce::String((int) allOk) + ")");
+    return handle;
+}
+
+bool PluginChain::activateChain(int handle, int crossfadeMs)
+{
+    const juce::ScopedLock sl(editLock);
+
+    auto it = preloaded.find(handle);
+
+    if (it == preloaded.end())
+    {
+        HostDebug::log("activateChain: unknown handle " + juce::String(handle));
+        return false;
+    }
+
+    auto list = it->second;
+    preloaded.erase(it);
+
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+
+    if (crossfadeMs <= 0)
+        publish(list);
+    else
+        publishWithCrossfade(list, crossfadeMs);
+
+    const double switchMs = juce::Time::getMillisecondCounterHiRes() - t0;
+
+    HostDebug::log("Activated preloaded chain handle=" + juce::String(handle)
+                   + " (crossfade " + juce::String(crossfadeMs) + " ms)"
+                   + " | switch " + juce::String(switchMs, 3) + " ms (target <50)");
+    return true;
+}
+
+void PluginChain::releasePreload(int handle)
+{
+    const juce::ScopedLock sl(editLock);
+    preloaded.erase(handle);
 }
 
 int PluginChain::getNumSlots() const
 {
-    juce::ScopedLock sl(lock);
-    return slots.size();
+    return (int) currentList()->size();
 }
 
 juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
 {
-    juce::ScopedLock sl(lock);
+    auto cur = currentList();
     juce::Array<SlotInfo> infos;
 
-    for (auto* slot : slots)
+    for (const auto& slot : *cur)
     {
         SlotInfo info;
         info.name = slot->instance != nullptr ? slot->instance->getName() : slot->description.name;
@@ -198,16 +325,28 @@ juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
 
 bool PluginChain::isBypassed(int index) const
 {
-    juce::ScopedLock sl(lock);
-    return juce::isPositiveAndBelow(index, slots.size()) && slots[index]->bypassed.load();
+    auto cur = currentList();
+    return juce::isPositiveAndBelow(index, (int) cur->size()) && (*cur)[(size_t) index]->bypassed.load();
+}
+
+int PluginChain::getTotalLatencySamples() const
+{
+    auto cur = currentList();
+    int total = 0;
+
+    for (const auto& slot : *cur)
+        if (slot->instance != nullptr && ! slot->bypassed.load())
+            total += slot->instance->getLatencySamples();
+
+    return total;
 }
 
 juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 {
-    juce::ScopedLock sl(lock);
+    auto cur = currentList();
     juce::Array<SlotSpec> specs;
 
-    for (auto* slot : slots)
+    for (const auto& slot : *cur)
     {
         if (slot->instance == nullptr)
             continue;
@@ -224,42 +363,93 @@ juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
 
 juce::AudioPluginInstance* PluginChain::getInstance(int index) const
 {
-    juce::ScopedLock sl(lock);
+    auto cur = currentList();
 
-    if (juce::isPositiveAndBelow(index, slots.size()))
-        return slots[index]->instance.get();
+    if (juce::isPositiveAndBelow(index, (int) cur->size()))
+        return (*cur)[(size_t) index]->instance.get();
 
     return nullptr;
 }
 
 void PluginChain::prepare(double sampleRate, int blockSize, int inputChannels, int outputChannels)
 {
-    juce::ScopedLock sl(lock);
+    const juce::ScopedLock sl(editLock);
 
     currentSampleRate = sampleRate;
     currentBlockSize = blockSize;
     currentInputChannels = juce::jmax(1, inputChannels);
     currentOutputChannels = juce::jmax(1, outputChannels);
 
+    auto cur = currentList();
+
     HostDebug::log("Chain prepare: " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize)
                    + ", in=" + juce::String(currentInputChannels) + ", out=" + juce::String(currentOutputChannels)
-                   + ", slots=" + juce::String(slots.size()));
+                   + ", slots=" + juce::String((int) cur->size()));
 
-    for (auto* slot : slots)
+    for (const auto& slot : *cur)
         prepareSlot(*slot);
 
-    updateProcessingChannelCount();
+    if (auto in = fadeInList.load())   // a crossfade target, if mid-transition
+        for (const auto& slot : *in)
+            prepareSlot(*slot);
+
+    for (auto& entry : preloaded)      // keep preloaded chains ready at the current sr/bs
+        for (const auto& slot : *entry.second)
+            prepareSlot(*slot);
+
+    processingChannelCount.store(computeChannelCount(*cur));
 }
 
 void PluginChain::processAudio(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
-    juce::ScopedLock sl(lock);
+    auto in  = fadeInList.load();
+    auto act = activeList.load();   // lock-free: copy shared_ptrs, keep lists alive for this block
 
-    for (auto* slot : slots)
+    if (in == nullptr)
     {
-        if (slot->instance == nullptr || slot->bypassed.load())
-            continue;   // bypassed slot: audio passes through untouched
+        runList(*act, buffer, midiMessages);   // steady state
+        return;
+    }
 
-        slot->instance->processBlock(buffer, midiMessages);
+    // ── Crossfade: run the outgoing (act) and incoming (in) chains in parallel ──
+    const auto epoch = transitionEpoch.load();
+
+    if (epoch != lastTransitionEpoch)
+    {
+        lastTransitionEpoch = epoch;
+        crossfadePos = 0;
+        crossfadeTotal = juce::jmax(1, requestedFadeSamples.load());
+    }
+
+    const int numCh = buffer.getNumChannels();
+    const int numSamples = buffer.getNumSamples();
+
+    fadeScratch.setSize(numCh, numSamples, false, false, true);
+
+    for (int ch = 0; ch < numCh; ++ch)
+        fadeScratch.copyFrom(ch, 0, buffer, ch, 0, numSamples);
+
+    juce::MidiBuffer midiForOutgoing(midiMessages);
+
+    runList(*act, fadeScratch, midiForOutgoing);   // outgoing -> scratch
+    runList(*in,  buffer,      midiMessages);       // incoming -> buffer
+
+    // Equal-power mix: out = scratch*cos(g) + buffer*sin(g), g ramps 0 -> pi/2.
+    for (int s = 0; s < numSamples; ++s)
+    {
+        const float t = juce::jlimit(0.0f, 1.0f, (float) (crossfadePos + s) / (float) crossfadeTotal);
+        const float gOut = std::cos(t * juce::MathConstants<float>::halfPi);
+        const float gIn  = std::sin(t * juce::MathConstants<float>::halfPi);
+
+        for (int ch = 0; ch < numCh; ++ch)
+            buffer.setSample(ch, s, fadeScratch.getSample(ch, s) * gOut + buffer.getSample(ch, s) * gIn);
+    }
+
+    crossfadePos += numSamples;
+
+    if (crossfadePos >= crossfadeTotal)
+    {
+        activeList.store(in);          // promote incoming to active (atomic, no deletion here)
+        fadeInList.store(nullptr);     // transition complete
     }
 }

@@ -43,6 +43,8 @@ MainComponent::MainComponent()
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
+    audioEngine.onMidiForControl = [this](const juce::MidiMessage& m) { handleControlMidi(m); };
+
     startTimerHz(10);   // performance metrics refresh
 
     HostDebug::log("MainComponent ready — scheduling VST3 scan");
@@ -139,6 +141,59 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &editorButton) { openSelectedEditor();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
+}
+
+void MainComponent::handleControlMidi(const juce::MidiMessage& message)
+{
+    if (midiLearnArmed.load())
+    {
+        const auto trigger = ControlMap::triggerFromMidi(message);
+
+        if (! trigger.isValid())
+            return;   // ignore non-mappable messages while learning
+
+        const auto action = pendingLearnAction;
+        midiLearnArmed.store(false);
+
+        juce::MessageManager::callAsync([this, trigger, action]
+        {
+            controlMap.addBinding({ trigger, action });
+            HostDebug::log("MIDI learn: bound " + trigger.toString() + " -> " + action.toString());
+        });
+        return;
+    }
+
+    const auto action = controlMap.matchMidi(message);
+
+    if (! action.isValid())
+        return;
+
+    juce::MessageManager::callAsync([this, action] { executeAction(action); });
+}
+
+void MainComponent::executeAction(const ControlAction& action)
+{
+    switch (action.type)
+    {
+        case ControlAction::Type::toggleBypass:
+            if (juce::isPositiveAndBelow(action.index, pluginHost.getNumSlots()))
+            {
+                const auto infos = pluginHost.getSlotInfos();
+                pluginHost.setBypass(action.index, ! infos.getReference(action.index).bypassed);
+                refreshChainList();
+            }
+            break;
+
+        case ControlAction::Type::nextScene:
+        case ControlAction::Type::prevScene:
+        case ControlAction::Type::loadScene:
+            HostDebug::log("Scene action (scenes wired in 4.5): " + action.toString());
+            break;
+
+        case ControlAction::Type::none:
+        default:
+            break;
+    }
 }
 
 void MainComponent::timerCallback()

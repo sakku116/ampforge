@@ -1,9 +1,11 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <atomic>
 #include "AudioEngine.h"
 #include "PluginHost.h"
 #include "PluginScanner.h"
+#include "ControlMap.h"
 
 class MainComponent : public juce::Component,
                       private juce::Button::Listener,
@@ -107,6 +109,10 @@ private:
     void saveLastPresetPath(const juce::File& file);
     void tryRestoreLastPreset();
 
+    // Live control (Phase 4)
+    void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
+    void executeAction(const ControlAction& action);           // called on the message thread
+
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
     AudioEngine audioEngine;
@@ -138,6 +144,11 @@ private:
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;
+
+    // ── Live control ───────────────────────────────────────────────────────────
+    ControlMap controlMap;
+    std::atomic<bool> midiLearnArmed { false };
+    ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;

@@ -7,7 +7,11 @@ class PluginScanner
 public:
     explicit PluginScanner(juce::AudioPluginFormatManager& formatManager);
 
+    /** Clear list then scan all registered formats (VST3 + VST2 if SDK was included). */
+    void scanAll();
+
     void scanDefaultWindowsVST3Folders();
+    void scanDefaultWindowsVST2Folders();
 
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
     juce::KnownPluginList& getKnownPluginList() { return knownPluginList; }

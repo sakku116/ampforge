@@ -155,11 +155,11 @@ MainComponent::MainComponent()
 
     startTimerHz(10);   // performance metrics refresh
 
-    HostDebug::log("MainComponent ready — scheduling VST3 scan");
+    HostDebug::log("MainComponent ready — scheduling plugin scan");
 
     juce::MessageManager::callAsync([this]
     {
-        pluginScanner.scanDefaultWindowsVST3Folders();
+        pluginScanner.scanAll();
         refreshPaletteList();
 
         // Restore scenes first so we know whether an active scene should own the chain.
@@ -342,8 +342,8 @@ void MainComponent::buttonClicked(juce::Button* button)
 
     if (button == &scanButton)
     {
-        HostDebug::log("UI: Scan VST3 clicked");
-        pluginScanner.scanDefaultWindowsVST3Folders();
+        HostDebug::log("UI: Rescan Plugins clicked");
+        pluginScanner.scanAll();
         refreshPaletteList();
         return;
     }

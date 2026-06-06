@@ -173,7 +173,7 @@ private:
     juce::Label controlSectionLabel { {}, "CONTROL" };
 
     juce::TextButton audioSettingsButton { "Audio Settings" };
-    juce::TextButton scanButton          { "Rescan VST3" };
+    juce::TextButton scanButton          { "Rescan Plugins" };
     juce::TextButton addButton           { "+ Add to Chain" };
     juce::TextButton savePresetButton    { "Save" };
     juce::TextButton loadPresetButton    { "Load" };

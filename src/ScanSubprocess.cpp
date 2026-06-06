@@ -14,14 +14,23 @@ juce::AudioPluginFormat* findVst3Format(juce::AudioPluginFormatManager& manager)
     return nullptr;
 }
 
-juce::String extractScanPath(const juce::String& commandLine)
+juce::AudioPluginFormat* findVst2Format(juce::AudioPluginFormatManager& manager)
 {
-    const auto flagIndex = commandLine.indexOf(scanFlag);
+    for (auto* format : manager.getFormats())
+        if (format->getName() == "VST")
+            return format;
+
+    return nullptr;
+}
+
+juce::String extractScanPath(const juce::String& commandLine, const char* flag)
+{
+    const auto flagIndex = commandLine.indexOf(flag);
 
     if (flagIndex < 0)
         return {};
 
-    auto path = commandLine.substring(flagIndex + juce::String(scanFlag).length());
+    auto path = commandLine.substring(flagIndex + juce::String(flag).length());
 
     if (path.startsWithChar('"'))
         path = path.unquoted();
@@ -66,12 +75,15 @@ int mergeXmlIntoList(const juce::String& xmlText, juce::KnownPluginList& destina
 
 bool isWorkerCommandLine(const juce::String& commandLine)
 {
-    return commandLine.contains(scanFlag);
+    return commandLine.contains(scanVst3Flag) || commandLine.contains(scanVst2Flag);
 }
 
 int runWorker(const juce::String& commandLine)
 {
-    const auto path = extractScanPath(commandLine);
+    const bool isVst2 = commandLine.contains(scanVst2Flag);
+    const char* flag  = isVst2 ? scanVst2Flag : scanVst3Flag;
+
+    const auto path = extractScanPath(commandLine, flag);
 
     if (path.isEmpty())
         return 2;
@@ -79,14 +91,15 @@ int runWorker(const juce::String& commandLine)
     juce::AudioPluginFormatManager formatManager;
     formatManager.addDefaultFormats();
 
-    auto* vst3Format = findVst3Format(formatManager);
+    auto* pluginFormat = isVst2 ? findVst2Format(formatManager)
+                                : findVst3Format(formatManager);
 
-    if (vst3Format == nullptr)
+    if (pluginFormat == nullptr)
         return 3;
 
     juce::KnownPluginList list;
     juce::OwnedArray<juce::PluginDescription> foundTypes;
-    list.scanAndAddFile(path, true, foundTypes, *vst3Format);
+    list.scanAndAddFile(path, true, foundTypes, *pluginFormat);
 
     if (auto xml = list.createXml())
         std::cout << xml->toString() << std::endl;
@@ -94,7 +107,9 @@ int runWorker(const juce::String& commandLine)
     return 0;
 }
 
-bool scanFileInChildProcess(const juce::String& vst3Path, juce::KnownPluginList& destinationList)
+bool scanFileInChildProcess(const juce::String& pluginPath,
+                             juce::KnownPluginList& destinationList,
+                             const char* scanFlagToUse)
 {
     const auto exe = getScanWorkerExecutable();
 
@@ -104,7 +119,7 @@ bool scanFileInChildProcess(const juce::String& vst3Path, juce::KnownPluginList&
         return false;
     }
 
-    const auto command = "\"" + exe.getFullPathName() + "\" " + scanFlag + "\"" + vst3Path + "\"";
+    const auto command = "\"" + exe.getFullPathName() + "\" " + juce::String(scanFlagToUse) + "\"" + pluginPath + "\"";
     HostDebug::log("Scan worker spawn: " + command);
 
     juce::ChildProcess child;
@@ -148,12 +163,12 @@ bool scanFileInChildProcess(const juce::String& vst3Path, juce::KnownPluginList&
             scannedList.recreateFromXml(*parsed);
 
             for (const auto& type : scannedList.getTypes())
-                HostDebug::log("  registered: " + type.name + " <- " + vst3Path);
+                HostDebug::log("  registered: " + type.name + " <- " + pluginPath);
         }
     }
     else
     {
-        HostDebug::log("Scan worker merged 0 types from " + vst3Path);
+        HostDebug::log("Scan worker merged 0 types from " + pluginPath);
     }
 
     return added >= 0;

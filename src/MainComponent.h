@@ -6,6 +6,7 @@
 #include "PluginHost.h"
 #include "PluginScanner.h"
 #include "ControlMap.h"
+#include "SceneManager.h"
 
 class MainComponent : public juce::Component,
                       private juce::Button::Listener,
@@ -114,6 +115,16 @@ private:
     void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
     void executeAction(const ControlAction& action);           // called on the message thread
 
+    // Scenes (Phase 4.5)
+    void captureScene();
+    void updateScene();
+    void deleteScene();
+    void recallScene(int index);
+    void stepScene(int delta);
+    void refreshSceneSelector();
+    void saveScenes();
+    void restoreScenes();
+
     // ── Core modules ─────────────────────────────────────────────────────────
     PluginHost pluginHost;
     AudioEngine audioEngine;
@@ -135,6 +146,12 @@ private:
     juce::TextButton editorButton        { "Open Editor" };
     juce::TextButton savePresetButton    { "Save Preset" };
     juce::TextButton loadPresetButton    { "Load Preset" };
+    juce::TextButton captureSceneButton  { "Capture Scene" };
+    juce::TextButton updateSceneButton   { "Update Scene" };
+    juce::TextButton deleteSceneButton   { "Delete Scene" };
+    juce::TextButton prevSceneButton     { "< Prev" };
+    juce::TextButton nextSceneButton     { "Next >" };
+    juce::ComboBox   sceneSelector;
 
     juce::StringArray paletteNames;
     juce::StringArray chainNames;
@@ -148,6 +165,7 @@ private:
 
     // ── Live control ───────────────────────────────────────────────────────────
     ControlMap controlMap;
+    SceneManager sceneManager;
     std::atomic<bool> midiLearnArmed { false };
     ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
 
@@ -155,6 +173,7 @@ private:
     juce::ApplicationProperties appProperties;
     static constexpr const char* audioDeviceStateKey = "audioDeviceState";
     static constexpr const char* lastPresetPathKey   = "lastPresetPath";
+    static constexpr const char* scenesStateKey      = "scenes";
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

@@ -35,11 +35,22 @@ MainComponent::MainComponent()
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
                      &upButton, &downButton, &bypassButton, &editorButton,
-                     &savePresetButton, &loadPresetButton })
+                     &savePresetButton, &loadPresetButton,
+                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
+                     &prevSceneButton, &nextSceneButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
     }
+
+    sceneSelector.setTextWhenNothingSelected("(no scenes)");
+    sceneSelector.onChange = [this]
+    {
+        const int idx = sceneSelector.getSelectedId() - 1;   // ids are index+1
+        if (idx >= 0 && idx != sceneManager.getCurrentIndex())
+            recallScene(idx);
+    };
+    addAndMakeVisible(sceneSelector);
 
     audioEngine.start();
     tryRestoreAudioDeviceState();
@@ -55,6 +66,7 @@ MainComponent::MainComponent()
         pluginScanner.scanDefaultWindowsVST3Folders();
         refreshPaletteList();
         tryRestoreLastPreset();
+        restoreScenes();
     });
 }
 
@@ -66,10 +78,13 @@ MainComponent::~MainComponent()
 
     for (auto* b : { &audioSettingsButton, &scanButton, &addButton, &removeButton,
                      &upButton, &downButton, &bypassButton, &editorButton,
-                     &savePresetButton, &loadPresetButton })
+                     &savePresetButton, &loadPresetButton,
+                     &captureSceneButton, &updateSceneButton, &deleteSceneButton,
+                     &prevSceneButton, &nextSceneButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
+    saveScenes();
     pluginHost.clearChain();
     saveAudioDeviceState();
     audioEngine.stop();
@@ -95,6 +110,21 @@ void MainComponent::resized()
     savePresetButton.setBounds(topRow.removeFromLeft(120));
     topRow.removeFromLeft(8);
     loadPresetButton.setBounds(topRow.removeFromLeft(120));
+
+    area.removeFromTop(8);
+
+    auto sceneRow = area.removeFromTop(34);
+    sceneSelector.setBounds(sceneRow.removeFromLeft(220));
+    sceneRow.removeFromLeft(8);
+    captureSceneButton.setBounds(sceneRow.removeFromLeft(120));
+    sceneRow.removeFromLeft(6);
+    updateSceneButton.setBounds(sceneRow.removeFromLeft(110));
+    sceneRow.removeFromLeft(6);
+    deleteSceneButton.setBounds(sceneRow.removeFromLeft(110));
+    sceneRow.removeFromLeft(6);
+    prevSceneButton.setBounds(sceneRow.removeFromLeft(80));
+    sceneRow.removeFromLeft(6);
+    nextSceneButton.setBounds(sceneRow.removeFromLeft(80));
 
     area.removeFromTop(10);
 
@@ -142,6 +172,11 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &editorButton) { openSelectedEditor();      return; }
     if (button == &savePresetButton) { savePreset();          return; }
     if (button == &loadPresetButton) { loadPreset();          return; }
+    if (button == &captureSceneButton) { captureScene();      return; }
+    if (button == &updateSceneButton)  { updateScene();       return; }
+    if (button == &deleteSceneButton)  { deleteScene();       return; }
+    if (button == &prevSceneButton)    { stepScene(-1);       return; }
+    if (button == &nextSceneButton)    { stepScene(+1);       return; }
 }
 
 void MainComponent::handleControlMidi(const juce::MidiMessage& message)
@@ -214,15 +249,113 @@ void MainComponent::executeAction(const ControlAction& action)
             }
             break;
 
-        case ControlAction::Type::nextScene:
-        case ControlAction::Type::prevScene:
-        case ControlAction::Type::loadScene:
-            HostDebug::log("Scene action (scenes wired in 4.5): " + action.toString());
-            break;
+        case ControlAction::Type::nextScene:  stepScene(+1);            break;
+        case ControlAction::Type::prevScene:  stepScene(-1);            break;
+        case ControlAction::Type::loadScene:  recallScene(action.index); break;
 
         case ControlAction::Type::none:
         default:
             break;
+    }
+}
+
+void MainComponent::captureScene()
+{
+    const auto name = "Scene " + juce::String(sceneManager.getNumScenes() + 1);
+    const int idx = sceneManager.addScene(name, pluginHost.captureChain());
+    sceneManager.setCurrentIndex(idx);
+    refreshSceneSelector();
+    saveScenes();
+    HostDebug::log("Scene captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
+}
+
+void MainComponent::updateScene()
+{
+    const int idx = sceneManager.getCurrentIndex();
+
+    if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.replaceScene(idx, pluginHost.captureChain());
+    saveScenes();
+    HostDebug::log("Scene updated: index " + juce::String(idx));
+}
+
+void MainComponent::deleteScene()
+{
+    const int idx = sceneManager.getCurrentIndex();
+
+    if (! juce::isPositiveAndBelow(idx, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.removeScene(idx);
+    refreshSceneSelector();
+    saveScenes();
+    HostDebug::log("Scene deleted: index " + juce::String(idx));
+}
+
+void MainComponent::recallScene(int index)
+{
+    if (! juce::isPositiveAndBelow(index, sceneManager.getNumScenes()))
+        return;
+
+    sceneManager.setCurrentIndex(index);
+    pluginHost.switchChainWithCrossfade(sceneManager.getScene(index).specs, 25);
+    refreshChainList();
+    refreshSceneSelector();
+    HostDebug::log("Scene recalled: index " + juce::String(index));
+}
+
+void MainComponent::stepScene(int delta)
+{
+    const int n = sceneManager.getNumScenes();
+
+    if (n == 0)
+        return;
+
+    int idx = sceneManager.getCurrentIndex();
+    idx = idx < 0 ? 0 : (idx + delta + n) % n;   // wrap around
+    recallScene(idx);
+}
+
+void MainComponent::refreshSceneSelector()
+{
+    sceneSelector.clear(juce::dontSendNotification);
+
+    const auto names = sceneManager.getSceneNames();
+
+    for (int i = 0; i < names.size(); ++i)
+        sceneSelector.addItem(names[i], i + 1);   // ids are index+1
+
+    const int cur = sceneManager.getCurrentIndex();
+
+    if (juce::isPositiveAndBelow(cur, names.size()))
+        sceneSelector.setSelectedId(cur + 1, juce::dontSendNotification);
+}
+
+void MainComponent::saveScenes()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        if (auto xml = sceneManager.toValueTree().createXml())
+            settings->setValue(scenesStateKey, xml.get());
+
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::restoreScenes()
+{
+    auto* settings = appProperties.getUserSettings();
+
+    if (settings == nullptr)
+        return;
+
+    if (auto xml = settings->getXmlValue(scenesStateKey))
+    {
+        sceneManager.fromValueTree(juce::ValueTree::fromXml(*xml));
+        refreshSceneSelector();
+        HostDebug::log("Scenes restored: " + juce::String(sceneManager.getNumScenes()));
     }
 }
 

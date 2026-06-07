@@ -39,8 +39,8 @@ target_sources(GtrFxSim
         src/Preset.cpp
         src/ControlMap.h
         src/ControlMap.cpp
-        src/SceneManager.h
-        src/SceneManager.cpp
+        src/TemplateManager.h
+        src/TemplateManager.cpp
         src/PluginHost.h
         src/PluginHost.cpp
         src/ToneForgeLookAndFeel.h

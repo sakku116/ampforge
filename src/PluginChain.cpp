@@ -138,6 +138,7 @@ bool PluginChain::addPlugin(const juce::PluginDescription& description, int targ
     }
 
     slot->sectionId = targetSectionId;
+    slot->slotId    = nextSlotId++;
 
     {
         const juce::ScopedLock sl(editLock);
@@ -466,6 +467,16 @@ std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<
         slot->bypassed.store(spec.bypassed);
         slot->customName = spec.customName;
 
+        if (spec.slotId > 0)
+        {
+            slot->slotId = spec.slotId;
+            nextSlotId = std::max(nextSlotId, spec.slotId + 1);
+        }
+        else
+        {
+            slot->slotId = nextSlotId++;
+        }
+
         // Validate sectionId; fall back to first section if unknown.
         bool validSec = false;
         for (const auto& def : sectionDefs)
@@ -658,6 +669,7 @@ juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
         info.format    = slot->description.pluginFormatName;
         info.bypassed  = slot->bypassed.load();
         info.sectionId = slot->sectionId;
+        info.slotId    = slot->slotId;
 
         for (const auto& def : sectionDefs)
             if (def.id == slot->sectionId) { info.isPreset = (def.type == SectionDef::Type::preset); break; }
@@ -701,6 +713,7 @@ juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
         spec.bypassed    = slot->bypassed.load();
         spec.customName  = slot->customName;
         spec.sectionId   = slot->sectionId;
+        spec.slotId      = slot->slotId;
         slot->instance->getStateInformation(spec.state);
         specs.add(spec);
     }

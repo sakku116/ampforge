@@ -37,6 +37,7 @@ public:
         bool hasCustomName = false;
         int  sectionId = 1;
         bool isPreset  = false;
+        int  slotId    = 0;       // stable identity — does not change on reorder/move
     };
 
     struct SlotSpec
@@ -46,6 +47,7 @@ public:
         bool bypassed = false;
         juce::String customName;   // empty = use plugin's own name
         int sectionId = 1;
+        int slotId    = 0;         // 0 = unset (assign new ID on load)
     };
 
     explicit PluginChain(juce::AudioPluginFormatManager& formatManager);
@@ -122,6 +124,7 @@ private:
         juce::PluginDescription description;
         juce::String customName;   // empty = use instance->getName(). Message-thread only.
         int sectionId = 1;         // message-thread only
+        int slotId    = 0;         // stable identity assigned at creation, never changes
     };
 
     using SlotList = std::vector<std::shared_ptr<Slot>>;
@@ -147,6 +150,7 @@ private:
     int nextSectionId   = 2;   // 1 is reserved for the default "Stomp 1"
     int nextStompCount  = 1;   // "Stomp 1" already exists
     int nextPresetCount = 0;
+    int nextSlotId      = 1;   // incremented on every new slot; never reset
 
     std::atomic<std::shared_ptr<SlotList>> activeList { std::make_shared<SlotList>() };
     std::atomic<std::shared_ptr<SlotList>> fadeInList { nullptr };   // incoming chain during a crossfade

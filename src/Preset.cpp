@@ -17,6 +17,7 @@ namespace
     const juce::Identifier propSectionId ("sectionId");
     const juce::Identifier propSectionName("sectionName");
     const juce::Identifier propSectionType("sectionType");
+    const juce::Identifier propSlotId    ("slotId");
 }
 
 juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
@@ -44,6 +45,8 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
         juce::ValueTree slot(slotType);
         slot.setProperty(propBypassed,  spec.bypassed,  nullptr);
         slot.setProperty(propSectionId, spec.sectionId, nullptr);
+        if (spec.slotId > 0)
+            slot.setProperty(propSlotId, spec.slotId, nullptr);
 
         if (spec.customName.isNotEmpty())
             slot.setProperty(propCustomName, spec.customName, nullptr);
@@ -109,6 +112,7 @@ bool fromValueTree(const juce::ValueTree& tree,
         spec.bypassed   = (bool) slot.getProperty(propBypassed, false);
         spec.customName = slot.getProperty(propCustomName, juce::String()).toString();
         spec.sectionId  = (int) slot.getProperty(propSectionId, outSections[0].id);
+        spec.slotId     = (int) slot.getProperty(propSlotId, 0);
 
         const auto stateStr = slot.getProperty(propState, juce::String()).toString();
         if (stateStr.isNotEmpty())

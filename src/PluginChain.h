@@ -26,6 +26,7 @@ public:
         juce::String name;
         Type         type     = Type::stomp;
         bool         bypassed = false;
+        float        gain     = 1.0f;   // section output gain (linear, applied after last slot)
     };
 
     struct SlotInfo
@@ -33,21 +34,23 @@ public:
         juce::String name;        // display name (customName if set, otherwise plugin name)
         juce::String originalName; // always the plugin's own name
         juce::String format;
-        bool bypassed = false;
-        bool hasCustomName = false;
-        int  sectionId = 1;
-        bool isPreset  = false;
-        int  slotId    = 0;       // stable identity — does not change on reorder/move
+        bool  bypassed    = false;
+        bool  hasCustomName = false;
+        int   sectionId   = 1;
+        bool  isPreset    = false;
+        int   slotId      = 0;      // stable identity — does not change on reorder/move
+        float postGain    = 1.0f;   // slot output gain (linear)
     };
 
     struct SlotSpec
     {
         juce::PluginDescription description;
         juce::MemoryBlock state;   // AudioPluginInstance::getStateInformation payload (may be empty)
-        bool bypassed = false;
+        bool         bypassed  = false;
         juce::String customName;   // empty = use plugin's own name
-        int sectionId = 1;
-        int slotId    = 0;         // 0 = unset (assign new ID on load)
+        int          sectionId = 1;
+        int          slotId    = 0;      // 0 = unset (assign new ID on load)
+        float        postGain  = 1.0f;  // slot output gain (linear)
     };
 
     explicit PluginChain(juce::AudioPluginFormatManager& formatManager);
@@ -78,6 +81,12 @@ public:
         from the displaced slot. Handles from == toIndex as a section-only change. */
     void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);
+    void setSlotGain(int index, float linearGain);
+    float getSlotGain(int index) const;
+    void setSectionGain(int sectionId, float linearGain);
+    float getSectionGain(int sectionId) const;
+    /** Returns the peak magnitude (0..1+) of the last audio block at the output of this section. */
+    float getSectionPeakLevel(int sectionId) const;
     /** Sets a user-visible display name on a slot. Empty string resets to plugin's own name. */
     void renameSlot(int index, const juce::String& newName);
     void clear();
@@ -119,8 +128,12 @@ private:
     struct Slot
     {
         std::unique_ptr<juce::AudioPluginInstance> instance;
-        std::atomic<bool> bypassed        { false };
-        std::atomic<bool> sectionBypassed { false };
+        std::atomic<bool>  bypassed           { false };
+        std::atomic<bool>  sectionBypassed    { false };
+        std::atomic<float> postGain           { 1.0f };   // slot output gain (audio thread)
+        std::atomic<float> sectionOutputGain  { 1.0f };   // propagated from SectionDef::gain (audio thread)
+        std::atomic<bool>  isLastInSection    { false };   // true for the last slot of its section (audio thread)
+        std::atomic<float> peakLevel          { 0.0f };   // peak magnitude of last block, written on audio thread
         juce::PluginDescription description;
         juce::String customName;   // empty = use instance->getName(). Message-thread only.
         int sectionId = 1;         // message-thread only

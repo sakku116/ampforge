@@ -18,6 +18,8 @@ namespace
     const juce::Identifier propSectionName("sectionName");
     const juce::Identifier propSectionType("sectionType");
     const juce::Identifier propSlotId    ("slotId");
+    const juce::Identifier propPostGain  ("postGain");
+    const juce::Identifier propSectionGain("sectionGain");
 }
 
 juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
@@ -37,6 +39,8 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
                             sec.type == PluginChain::SectionDef::Type::preset
                                 ? juce::String("preset") : juce::String("stomp"),
                             nullptr);
+        if (sec.gain != 1.0f)
+            secNode.setProperty(propSectionGain, sec.gain, nullptr);
         root.addChild(secNode, -1, nullptr);
     }
 
@@ -53,6 +57,9 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
 
         if (spec.state.getSize() > 0)
             slot.setProperty(propState, spec.state.toBase64Encoding(), nullptr);
+
+        if (spec.postGain != 1.0f)
+            slot.setProperty(propPostGain, spec.postGain, nullptr);
 
         if (auto descXml = spec.description.createXml())
             slot.addChild(juce::ValueTree::fromXml(*descXml), -1, nullptr);
@@ -94,6 +101,7 @@ bool fromValueTree(const juce::ValueTree& tree,
         def.type = child.getProperty(propSectionType, "stomp").toString() == "preset"
                    ? PluginChain::SectionDef::Type::preset
                    : PluginChain::SectionDef::Type::stomp;
+        def.gain = (float) (double) child.getProperty(propSectionGain, 1.0);
         outSections.add(def);
     }
 
@@ -113,6 +121,7 @@ bool fromValueTree(const juce::ValueTree& tree,
         spec.customName = slot.getProperty(propCustomName, juce::String()).toString();
         spec.sectionId  = (int) slot.getProperty(propSectionId, outSections[0].id);
         spec.slotId     = (int) slot.getProperty(propSlotId, 0);
+        spec.postGain   = (float) (double) slot.getProperty(propPostGain, 1.0);
 
         const auto stateStr = slot.getProperty(propState, juce::String()).toString();
         if (stateStr.isNotEmpty())

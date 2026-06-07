@@ -109,6 +109,23 @@ MainComponent::MainComponent()
         setTemplateDirty(templateManager.getCurrentIndex() >= 0);
     };
 
+    chainModel.onSlotGainChanged = [this](int slotIndex, float linearGain)
+    {
+        pluginHost.setSlotGain(slotIndex, linearGain);
+        setTemplateDirty(templateManager.getCurrentIndex() >= 0);
+    };
+
+    chainModel.onSectionGainChanged = [this](int sectionId, float linearGain)
+    {
+        pluginHost.setSectionGain(sectionId, linearGain);
+        setTemplateDirty(templateManager.getCurrentIndex() >= 0);
+    };
+
+    chainModel.onGetSectionLevel = [this](int sectionId) -> float
+    {
+        return pluginHost.getSectionPeakLevel(sectionId);
+    };
+
     // Scene action buttons: icon text + tooltip so their purpose is clear at a glance.
     captureTemplateButton.setButtonText(juce::String::fromUTF8("\xE2\x8A\x95"));   // ⊕
     updateTemplateButton .setButtonText(juce::String::fromUTF8("\xE2\x86\x91"));   // ↑
@@ -920,6 +937,7 @@ void MainComponent::refreshChainList()
         header.isFirstSection  = (si == 0);
         header.isLastSection   = (si == lastSecIdx);
         header.sectionBypassed = sec.bypassed;
+        header.sectionGain     = sec.gain;
         rows.add(header);
 
         // Collect slot indices belonging to this section (preserving flat-list order).

@@ -71,6 +71,26 @@ void PluginChain::prepareSlot(Slot& slot)
 
 void PluginChain::publish(std::shared_ptr<SlotList> next)
 {
+    // Recompute per-slot derived state that the audio thread reads atomically.
+    // Must be done before making the list live so audio thread never sees stale data.
+    {
+        // Build section gain map from current sectionDefs.
+        std::map<int, float> secGains;
+        for (const auto& def : sectionDefs)
+            secGains[def.id] = def.gain;
+
+        const int n = (int) next->size();
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& slot = (*next)[(size_t) i];
+            const bool isLast = (i + 1 >= n) || ((*next)[(size_t)(i + 1)]->sectionId != slot->sectionId);
+            slot->isLastInSection.store(isLast);
+
+            auto it = secGains.find(slot->sectionId);
+            slot->sectionOutputGain.store(it != secGains.end() ? it->second : 1.0f);
+        }
+    }
+
     processingChannelCount.store(computeChannelCount(*next));
 
     fadeInList.store(nullptr);   // cancel any in-progress crossfade
@@ -85,6 +105,24 @@ void PluginChain::publish(std::shared_ptr<SlotList> next)
 
 void PluginChain::publishWithCrossfade(std::shared_ptr<SlotList> next, int crossfadeMs)
 {
+    // Apply the same per-slot derived state as publish() so the incoming list
+    // has correct gains when the audio thread runs it during crossfade.
+    {
+        std::map<int, float> secGains;
+        for (const auto& def : sectionDefs)
+            secGains[def.id] = def.gain;
+
+        const int n = (int) next->size();
+        for (int i = 0; i < n; ++i)
+        {
+            const auto& slot = (*next)[(size_t) i];
+            const bool isLast = (i + 1 >= n) || ((*next)[(size_t)(i + 1)]->sectionId != slot->sectionId);
+            slot->isLastInSection.store(isLast);
+            auto it = secGains.find(slot->sectionId);
+            slot->sectionOutputGain.store(it != secGains.end() ? it->second : 1.0f);
+        }
+    }
+
     processingChannelCount.store(juce::jmax(computeChannelCount(*currentList()),
                                            computeChannelCount(*next)));
 
@@ -104,10 +142,26 @@ void PluginChain::runList(const SlotList& list, juce::AudioBuffer<float>& buffer
 {
     for (const auto& slot : list)
     {
-        if (slot->bypassed.load() || slot->sectionBypassed.load())
-            continue;
+        const bool active = !slot->bypassed.load() && !slot->sectionBypassed.load();
 
-        slot->instance->processBlock(buffer, midi);
+        if (active)
+        {
+            slot->instance->processBlock(buffer, midi);
+
+            const float pg = slot->postGain.load();
+            if (pg != 1.0f)
+                buffer.applyGain(pg);
+        }
+
+        if (slot->isLastInSection.load())
+        {
+            const float sg = slot->sectionOutputGain.load();
+            if (sg != 1.0f)
+                buffer.applyGain(sg);
+
+            // Compute and store peak for the level meter (audio thread write).
+            slot->peakLevel.store(buffer.getMagnitude(0, buffer.getNumSamples()));
+        }
     }
 }
 
@@ -283,6 +337,50 @@ void PluginChain::renameSlot(int index, const juce::String& newName)
 
     if (juce::isPositiveAndBelow(index, (int) cur->size()))
         (*cur)[(size_t) index]->customName = newName;   // message-thread only; no republish needed
+}
+
+void PluginChain::setSlotGain(int index, float linearGain)
+{
+    const juce::ScopedLock sl(editLock);
+    auto cur = currentList();
+    if (juce::isPositiveAndBelow(index, (int) cur->size()))
+        (*cur)[(size_t) index]->postGain.store(linearGain);   // atomic; no republish needed
+}
+
+float PluginChain::getSlotGain(int index) const
+{
+    auto cur = currentList();
+    if (juce::isPositiveAndBelow(index, (int) cur->size()))
+        return (*cur)[(size_t) index]->postGain.load();
+    return 1.0f;
+}
+
+void PluginChain::setSectionGain(int sectionId, float linearGain)
+{
+    for (auto& def : sectionDefs)
+        if (def.id == sectionId) { def.gain = linearGain; break; }
+
+    // Propagate to all slots in this section atomically — no republish needed.
+    auto cur = currentList();
+    for (const auto& slot : *cur)
+        if (slot->sectionId == sectionId)
+            slot->sectionOutputGain.store(linearGain);
+}
+
+float PluginChain::getSectionGain(int sectionId) const
+{
+    for (const auto& def : sectionDefs)
+        if (def.id == sectionId) return def.gain;
+    return 1.0f;
+}
+
+float PluginChain::getSectionPeakLevel(int sectionId) const
+{
+    auto cur = displayList();
+    for (const auto& slot : *cur)
+        if (slot->sectionId == sectionId && slot->isLastInSection.load())
+            return slot->peakLevel.load();
+    return 0.0f;
 }
 
 void PluginChain::clear()
@@ -465,6 +563,7 @@ std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<
             slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
 
         slot->bypassed.store(spec.bypassed);
+        slot->postGain.store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
         slot->customName = spec.customName;
 
         if (spec.slotId > 0)
@@ -670,6 +769,7 @@ juce::Array<PluginChain::SlotInfo> PluginChain::getSlotInfos() const
         info.bypassed  = slot->bypassed.load();
         info.sectionId = slot->sectionId;
         info.slotId    = slot->slotId;
+        info.postGain  = slot->postGain.load();
 
         for (const auto& def : sectionDefs)
             if (def.id == slot->sectionId) { info.isPreset = (def.type == SectionDef::Type::preset); break; }
@@ -714,6 +814,7 @@ juce::Array<PluginChain::SlotSpec> PluginChain::captureSpecs() const
         spec.customName  = slot->customName;
         spec.sectionId   = slot->sectionId;
         spec.slotId      = slot->slotId;
+        spec.postGain    = slot->postGain.load();
         slot->instance->getStateInformation(spec.state);
         specs.add(spec);
     }

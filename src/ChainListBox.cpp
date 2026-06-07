@@ -1,6 +1,184 @@
 #include "ChainListBox.h"
 #include "ToneForgeLookAndFeel.h"
 
+// ── VolumeSliderCallout ────────────────────────────────────────────────────────
+
+/** Content component shown inside a juce::CallOutBox when the VolumeControl
+    button is clicked. Contains a horizontal slider + a reset-to-0-dB button. */
+class VolumeSliderCallout : public juce::Component
+{
+public:
+    std::function<void(double)> onValueChanged;   // dB
+
+    explicit VolumeSliderCallout(double initialDb)
+    {
+        slider.setSliderStyle(juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle(juce::Slider::TextBoxLeft, false, 62, 24);
+        slider.setRange(-30.0, 6.0, 0.1);
+        slider.setSkewFactorFromMidPoint(0.0);
+        slider.setValue(initialDb, juce::dontSendNotification);
+        slider.setNumDecimalPlacesToDisplay(1);
+        slider.setTextValueSuffix(" dB");
+        addAndMakeVisible(slider);
+
+        resetBtn.setButtonText(juce::String::fromUTF8("\xE2\x86\xBA") + " 0 dB");  // ↺ 0 dB
+        resetBtn.setMouseCursor(juce::MouseCursor::PointingHandCursor);
+        addAndMakeVisible(resetBtn);
+
+        slider.onValueChange = [this] { if (onValueChanged) onValueChanged(slider.getValue()); };
+        resetBtn.onClick      = [this] { slider.setValue(0.0, juce::sendNotification); };
+
+        setSize(270, 46);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced(6, 8);
+        resetBtn.setBounds(area.removeFromRight(62));
+        area.removeFromRight(4);
+        slider.setBounds(area);
+    }
+
+private:
+    juce::Slider     slider;
+    juce::TextButton resetBtn;
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VolumeSliderCallout)
+};
+
+// ── VolumeControl ─────────────────────────────────────────────────────────────
+
+float VolumeControl::toLinear(double dB)
+{
+    return dB <= -30.0 ? 0.0f : (float) juce::Decibels::decibelsToGain((float) dB);
+}
+
+double VolumeControl::fromLinear(float gain)
+{
+    return gain < 0.001f ? -30.0 : (double) juce::Decibels::gainToDecibels(gain);
+}
+
+VolumeControl::VolumeControl()
+{
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    setTooltip("Output volume. Click to adjust.");
+}
+
+void VolumeControl::setValue(double dB, juce::NotificationType)
+{
+    currentdB = dB;
+    repaint();
+}
+
+void VolumeControl::paint(juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat().reduced(1.0f);
+    const bool isNeutral = std::abs(currentdB) < 0.05;
+
+    // Button background.
+    g.setColour(hovered ? tf::colour::surface3.brighter(0.08f) : tf::colour::surface3);
+    g.fillRoundedRectangle(r, 3.0f);
+
+    if (!isNeutral)
+    {
+        g.setColour(tf::colour::accent.withAlpha(0.18f));
+        g.fillRoundedRectangle(r, 3.0f);
+    }
+
+    // Thin border.
+    g.setColour(tf::colour::outline.withAlpha(hovered ? 0.6f : 0.35f));
+    g.drawRoundedRectangle(r.reduced(0.5f), 3.0f, 0.8f);
+
+    // Split: icon top half, label bottom half.
+    const float cx  = r.getCentreX();
+    const float mid = r.getY() + r.getHeight() * 0.52f;
+
+    // Speaker icon (body + horn + optional wave arc).
+    const juce::Colour iconColour = isNeutral ? tf::colour::textDim : tf::colour::accent;
+    g.setColour(iconColour);
+
+    const float iy  = r.getY() + 3.5f;          // icon top
+    const float ih  = mid - iy - 2.0f;           // icon height
+    const float ibx = cx - 5.5f;                 // body left x
+    const float ibw = 3.5f;                       // body width
+
+    // Speaker body rect.
+    juce::Path icon;
+    icon.addRectangle(ibx, iy + ih * 0.2f, ibw, ih * 0.6f);
+
+    // Horn (trapezoid).
+    const float hx = ibx + ibw;
+    icon.startNewSubPath(hx, iy + ih * 0.15f);
+    icon.lineTo(hx + 4.5f, iy);
+    icon.lineTo(hx + 4.5f, iy + ih);
+    icon.lineTo(hx, iy + ih * 0.85f);
+    icon.closeSubPath();
+
+    g.fillPath(icon);
+
+    // Sound wave arcs (only when not muted).
+    if (currentdB > -30.0)
+    {
+        const float midY = iy + ih * 0.5f;
+        // Inner arc — small.
+        {
+            juce::Path arc;
+            const float wr = ih * 0.38f;
+            arc.addArc(hx + 5.5f - wr, midY - wr, wr * 2.0f, wr * 2.0f,
+                       juce::MathConstants<float>::pi * 1.25f,
+                       juce::MathConstants<float>::pi * 1.75f, true);
+            g.strokePath(arc, juce::PathStrokeType(1.0f));
+        }
+        if (currentdB > -12.0)
+        {
+            juce::Path arc;
+            const float wr = ih * 0.62f;
+            arc.addArc(hx + 5.5f - wr, midY - wr, wr * 2.0f, wr * 2.0f,
+                       juce::MathConstants<float>::pi * 1.3f,
+                       juce::MathConstants<float>::pi * 1.7f, true);
+            g.strokePath(arc, juce::PathStrokeType(1.0f));
+        }
+    }
+
+    // dB label.
+    juce::String label;
+    if (currentdB <= -30.0)  label = "-inf";
+    else if (std::abs(currentdB) < 0.05) label = "0 dB";
+    else label = (currentdB > 0 ? "+" : "") + juce::String(currentdB, 1);
+
+    g.setColour(isNeutral ? tf::colour::textDim : tf::colour::text);
+    g.setFont(juce::FontOptions(8.0f));
+    g.drawText(label, r.withTop(mid), juce::Justification::centred);
+}
+
+void VolumeControl::mouseEnter(const juce::MouseEvent&) { hovered = true;  repaint(); }
+void VolumeControl::mouseExit (const juce::MouseEvent&) { hovered = false; repaint(); }
+
+void VolumeControl::mouseDown(const juce::MouseEvent& e)
+{
+    if (e.mods.isLeftButtonDown())
+        showCallout();
+}
+
+void VolumeControl::showCallout()
+{
+    auto* content = new VolumeSliderCallout(currentdB);
+
+    juce::Component::SafePointer<VolumeControl> safeThis(this);
+    content->onValueChanged = [safeThis](double dB)
+    {
+        if (safeThis == nullptr) return;
+        safeThis->currentdB = dB;
+        safeThis->repaint();
+        if (safeThis->onGainChanged)
+            safeThis->onGainChanged(VolumeControl::toLinear(dB));
+    };
+
+    juce::CallOutBox::launchAsynchronously(
+        std::unique_ptr<juce::Component>(content),
+        getScreenBounds(),
+        nullptr);
+}
+
 namespace
 {
     const juce::String kUp             = juce::String::fromUTF8("\xE2\x96\xB2");   // ▲
@@ -69,6 +247,15 @@ SectionHeaderComponent::SectionHeaderComponent(ChainListModel& ownerModel) : mod
         if (model.onSectionBypass)
             model.onSectionBypass(sectionId, sectionBypassed);
     };
+
+    volumeControl.onGainChanged = [this](float gain)
+    {
+        if (model.onSectionGainChanged)
+            model.onSectionGainChanged(sectionId, gain);
+    };
+    addAndMakeVisible(volumeControl);
+
+    startTimerHz(24);   // refresh level meter ~24 fps
 }
 
 void SectionHeaderComponent::update(int rowIdx, const ChainRow& row, bool isRowSelected)
@@ -85,6 +272,8 @@ void SectionHeaderComponent::update(int rowIdx, const ChainRow& row, bool isRowS
     bypassButton.setColour(juce::TextButton::buttonColourId,
                            sectionBypassed ? tf::colour::warn.withAlpha(0.28f) : juce::Colour{});
 
+    volumeControl.setValue(VolumeControl::fromLinear(row.sectionGain));
+
     upButton.setEnabled(! isFirst);
     downButton.setEnabled(! isLast);
     repaint();
@@ -96,7 +285,8 @@ void SectionHeaderComponent::resized()
     removeButton.setBounds(area.removeFromRight(26));   area.removeFromRight(3);
     downButton  .setBounds(area.removeFromRight(26));   area.removeFromRight(2);
     upButton    .setBounds(area.removeFromRight(26));   area.removeFromRight(6);
-    bypassButton.setBounds(area.removeFromRight(26));
+    bypassButton.setBounds(area.removeFromRight(26));   area.removeFromRight(4);
+    volumeControl.setBounds(area.removeFromRight(30).reduced(0, 3));
 }
 
 void SectionHeaderComponent::paint(juce::Graphics& g)
@@ -134,12 +324,70 @@ void SectionHeaderComponent::paint(juce::Graphics& g)
     g.setFont(badgeFont);
     g.drawText(badge, badgeRect, juce::Justification::centred);
 
-    // Section name.
+    // Section name + level meter area.
     auto nameArea = getLocalBounds().reduced(4 + (int) badgeW + 16, 0);
-    nameArea.removeFromRight(26 * 4 + 3 + 2 + 6 + 6);   // reserve space for 4 buttons
+    // Reserve space for volume control + 4 buttons on the right.
+    nameArea.removeFromRight(30 + 3 + 26 * 4 + 3 + 2 + 6 + 6);
+
+    // Level meter strip at the bottom of the name area.
+    auto meterArea = nameArea.removeFromBottom(7).reduced(0, 1);
+    const float level = juce::jlimit(0.0f, 1.0f, displayLevel);
+    const float hold  = juce::jlimit(0.0f, 1.0f, peakHold);
+
+    // Background track.
+    g.setColour(tf::colour::outline.withAlpha(0.4f));
+    g.fillRoundedRectangle(meterArea.toFloat(), 2.0f);
+
+    // Filled level bar — colour shifts green→yellow→red.
+    if (level > 0.0f)
+    {
+        const int filledW = juce::roundToInt(level * meterArea.getWidth());
+        auto filled = meterArea.withWidth(filledW);
+
+        const juce::Colour lo = juce::Colour(0xff22c55e);   // green
+        const juce::Colour hi = juce::Colour(0xffef4444);   // red
+        g.setColour(lo.interpolatedWith(hi, level));
+        g.fillRoundedRectangle(filled.toFloat(), 2.0f);
+    }
+
+    // Peak-hold tick.
+    if (hold > 0.0f)
+    {
+        const int holdX = meterArea.getX() + juce::roundToInt(hold * meterArea.getWidth());
+        g.setColour(juce::Colours::white.withAlpha(0.6f));
+        g.fillRect(holdX - 1, meterArea.getY(), 2, meterArea.getHeight());
+    }
+
     g.setColour(tf::colour::text);
     g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
     g.drawText(sectionName, nameArea, juce::Justification::centredLeft);
+}
+
+void SectionHeaderComponent::timerCallback()
+{
+    if (model.onGetSectionLevel)
+    {
+        const float raw = model.onGetSectionLevel(sectionId);
+        // Smooth: fast attack, slow decay.
+        displayLevel = raw > displayLevel ? raw : displayLevel * 0.88f;
+
+        // Peak hold: freeze for ~40 frames (~1.7 s at 24 fps), then decay.
+        if (raw >= peakHold)
+        {
+            peakHold = raw;
+            peakHoldCounter = 40;
+        }
+        else if (peakHoldCounter > 0)
+        {
+            --peakHoldCounter;
+        }
+        else
+        {
+            peakHold = peakHold * 0.92f;
+        }
+
+        repaint();
+    }
 }
 
 void SectionHeaderComponent::mouseDown(const juce::MouseEvent& e)
@@ -183,6 +431,13 @@ ChainSlotComponent::ChainSlotComponent(ChainListModel& ownerModel) : model(owner
     bypassButton.onClick = [this] { if (model.onBypass) model.onBypass(slotIndex); };
     editorButton.onClick = [this] { if (model.onEditor) model.onEditor(slotIndex); };
     removeButton.onClick = [this] { if (model.onRemove) model.onRemove(slotIndex); };
+
+    volumeControl.onGainChanged = [this](float gain)
+    {
+        if (model.onSlotGainChanged)
+            model.onSlotGainChanged(slotIndex, gain);
+    };
+    addAndMakeVisible(volumeControl);
 }
 
 void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
@@ -201,6 +456,8 @@ void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
     bypassed      = info.bypassed;
     hasCustomName = info.hasCustomName;
     isPreset      = info.isPreset;
+
+    volumeControl.setValue(VolumeControl::fromLinear(info.postGain));
 
     if (isPreset)
     {
@@ -227,9 +484,10 @@ void ChainSlotComponent::resized()
     auto area = getLocalBounds().reduced(6, 5);
 
     const int gap = 4;
-    removeButton.setBounds(area.removeFromRight(30));  area.removeFromRight(gap);
-    editorButton.setBounds(area.removeFromRight(34));  area.removeFromRight(gap);
-    bypassButton.setBounds(area.removeFromRight(34));  area.removeFromRight(gap);
+    removeButton.setBounds(area.removeFromRight(30));   area.removeFromRight(gap);
+    editorButton.setBounds(area.removeFromRight(34));   area.removeFromRight(gap);
+    bypassButton.setBounds(area.removeFromRight(34));   area.removeFromRight(gap);
+    volumeControl.setBounds(area.removeFromRight(32));               area.removeFromRight(gap);
 
     gripArea = area.removeFromLeft(18);
     textArea = area;

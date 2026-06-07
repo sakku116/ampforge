@@ -148,6 +148,10 @@ struct ControlTrigger {
 | Stable slotId (bindings survive reorder) | `PluginChain::Slot::slotId`, `findSlotIndexById` |
 | Right-click "Learn Control" on slot rows | `ChainListModel::onLearnControl` context menu |
 | Key label display (char not code) | `juce::KeyPress(number).getTextDescription()` |
+| Per-slot post-effect volume control | `PluginChain::setSlotGain`, `Slot::postGain` atomic, `VolumeControl` button on each slot row |
+| Per-section output volume control | `PluginChain::setSectionGain`, `SectionDef::gain`, `Slot::sectionOutputGain` atomic (applied at last slot of section) |
+| Section level metering | `Slot::peakLevel` atomic, `SectionHeaderComponent` timer 24fps, horizontal bar with peak-hold |
+| Volume control UI | `VolumeControl` — button (speaker icon + dB label); click opens `CallOutBox` with horizontal slider + reset button |
 
 ---
 
@@ -183,15 +187,15 @@ struct ControlTrigger {
 
 ```xml
 <TONEFORGE_PRESET name="My Preset" version="2">
-  <SECTION sectionId="1" sectionName="Stomp 1" sectionType="stomp"/>
+  <SECTION sectionId="1" sectionName="Stomp 1" sectionType="stomp" sectionGain="0.891"/>
   <SECTION sectionId="2" sectionName="Presets" sectionType="preset"/>
-  <SLOT bypassed="0" sectionId="1" slotId="3" customName="" state="<base64>">
+  <SLOT bypassed="0" sectionId="1" slotId="3" customName="" postGain="1.122" state="<base64>">
     <PLUGIN ... />   <!-- juce::PluginDescription XML -->
   </SLOT>
   ...
 </TONEFORGE_PRESET>
 ```
-v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` absent → `buildList` assigns fresh IDs (existing control bindings need re-learn, one-time migration cost).
+v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` absent → `buildList` assigns fresh IDs (existing control bindings need re-learn, one-time migration cost). `postGain`/`sectionGain` absent → defaults to 1.0 (backward compatible).
 
 ---
 
@@ -228,6 +232,6 @@ v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` a
 
 ## Recently Completed Work (last 3 sessions)
 
-1. **Full rename:** `SceneManager/Scene*` → `TemplateManager/Template*` across all files, components, variables, methods, file names. Default template name `"Template {num}"`.
-2. **Control map fixes:** Learn bypass/preset select; duplicate key warning dialog; right-click "Learn Control" on plugin rows; hint labels on rows; `juce::KeyPress::getTextDescription()` for key labels; `refreshChainList()` after clear maps.
-3. **Stable slotId:** `ControlAction::index` for bypass/preset actions now stores `slotId` not positional index. Bindings survive section reorder. `findSlotIndexById()` resolves at execution. Persisted in `SlotSpec` and `Preset.cpp`.
+1. **Stable slotId:** `ControlAction::index` for bypass/preset actions now stores `slotId` not positional index. Bindings survive section reorder. `findSlotIndexById()` resolves at execution. Persisted in `SlotSpec` and `Preset.cpp`.
+2. **Per-slot & per-section volume:** `Slot::postGain` + `SectionDef::gain` atomics; section gain applied at last slot of each section via `isLastInSection` flag (computed in `publish()`/`publishWithCrossfade()`). Level metering via `Slot::peakLevel` polled by `SectionHeaderComponent` timer. Gains persist in `.tfpreset`.
+3. **VolumeControl UI:** Replaced rotary `VolumeKnob` with `VolumeControl` — a button showing speaker icon + dB label. Click opens `juce::CallOutBox` (tooltip-style bubble) with a horizontal slider (−30…+6 dB, midpoint = 0 dB) and a "↺ 0 dB" reset button. `juce::SettableTooltipClient` inherited for tooltip support.

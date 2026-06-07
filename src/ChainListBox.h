@@ -3,6 +3,42 @@
 #include <JuceHeader.h>
 #include "PluginChain.h"
 
+// ── VolumeControl ──────────────────────────────────────────────────────────────
+
+/** Small button for per-slot and per-section output gain.
+    Clicking opens a CallOutBox with a horizontal slider (-30 dB … +6 dB)
+    and a reset-to-0-dB button.
+    onGainChanged(float linearGain) fires on every slider change. */
+class VolumeControl : public juce::Component,
+                      public juce::SettableTooltipClient
+{
+public:
+    std::function<void(float)> onGainChanged;
+
+    VolumeControl();
+
+    void   setValue(double dB, juce::NotificationType = juce::dontSendNotification);
+    double getValue() const { return currentdB; }
+
+    static float  toLinear(double dB);
+    static double fromLinear(float gain);
+
+    void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseEnter(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
+
+private:
+    double currentdB = 0.0;
+    bool   hovered   = false;
+
+    void showCallout();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VolumeControl)
+};
+
+// ── ChainRow ───────────────────────────────────────────────────────────────────
+
 /** A single row in the chain list: either a section header or a plugin slot. */
 struct ChainRow
 {
@@ -16,6 +52,7 @@ struct ChainRow
     bool isFirstSection  = false;
     bool isLastSection   = false;
     bool sectionBypassed = false;
+    float sectionGain    = 1.0f;   // section output gain (linear)
 
     // Slot fields (used when kind == slot):
     PluginChain::SlotInfo slotInfo;
@@ -41,6 +78,11 @@ public:
     std::function<void(int)> onRename;
     std::function<void(int)> onResetName;
     std::function<void(int)> onLearnControl;
+
+    // Gain callbacks:
+    std::function<void(int, float)> onSlotGainChanged;     // (slotIndex, linearGain)
+    std::function<void(int, float)> onSectionGainChanged;  // (sectionId, linearGain)
+    std::function<float(int)>       onGetSectionLevel;     // (sectionId) → peak 0..1+
 
     // Section-action callbacks (receive sectionId):
     std::function<void(int)>       onSectionMoveUp;
@@ -70,7 +112,8 @@ private:
 
 // ── Section header row ─────────────────────────────────────────────────────────
 
-class SectionHeaderComponent : public juce::Component
+class SectionHeaderComponent : public juce::Component,
+                               private juce::Timer
 {
 public:
     explicit SectionHeaderComponent(ChainListModel& ownerModel);
@@ -81,6 +124,8 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
 
 private:
+    void timerCallback() override;
+
     ChainListModel& model;
 
     int  rowIndex   = -1;
@@ -93,6 +138,11 @@ private:
     PluginChain::SectionDef::Type sectionType = PluginChain::SectionDef::Type::stomp;
 
     juce::TextButton upButton, downButton, removeButton, bypassButton;
+    VolumeControl    volumeControl;
+
+    float displayLevel    = 0.0f;   // smoothed peak level for the meter
+    float peakHold        = 0.0f;   // peak-hold value
+    int   peakHoldCounter = 0;      // frames before peak starts decaying
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SectionHeaderComponent)
 };
@@ -133,6 +183,7 @@ private:
     static constexpr int kDragThreshold = 6;
 
     juce::TextButton bypassButton, editorButton, removeButton;
+    VolumeControl    volumeControl;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChainSlotComponent)
 };

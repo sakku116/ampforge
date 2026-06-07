@@ -24,7 +24,7 @@ juce::String ControlTrigger::toString() const
         case Type::midiNote:    return "Note " + juce::String(number) + " (ch " + chan + ")";
         case Type::midiCC:      return "CC " + juce::String(number) + " (ch " + chan + ")";
         case Type::midiProgram: return "Program " + juce::String(number) + " (ch " + chan + ")";
-        case Type::key:         return "Key " + juce::String(number);
+        case Type::key:         return "Key " + juce::KeyPress(number).getTextDescription();
         case Type::none:
         default:                return "—";
     }
@@ -41,9 +41,9 @@ juce::String ControlAction::toString() const
 {
     switch (type)
     {
-        case Type::nextScene:    return "Next Scene";
-        case Type::prevScene:    return "Prev Scene";
-        case Type::loadScene:    return "Load Scene " + juce::String(index + 1);
+        case Type::nextTemplate:    return "Next Template";
+        case Type::prevTemplate:    return "Prev Template";
+        case Type::loadTemplate:    return "Load Template " + juce::String(index + 1);
         case Type::toggleBypass:       return "Toggle Bypass slot " + juce::String(index + 1);
         case Type::activatePresetSlot: return "Activate Preset Slot " + juce::String(index + 1);
         case Type::none:

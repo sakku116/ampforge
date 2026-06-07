@@ -6,7 +6,7 @@
 #include "PluginHost.h"
 #include "PluginScanner.h"
 #include "ControlMap.h"
-#include "SceneManager.h"
+#include "TemplateManager.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
 
@@ -275,6 +275,7 @@ private:
     // Helpers for ChainRow ↔ slotIndex mapping.
     int  rowToSlotIndex(int row) const;
     int  getTargetSectionId() const;
+    int  findSlotIndexById(int slotId) const;
 
     void savePreset();
     void loadPreset();
@@ -286,20 +287,21 @@ private:
     void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
     void executeAction(const ControlAction& action);           // called on the message thread
 
-    // Scenes (Phase 4.5)
-    void captureScene();
-    void updateScene();
-    void renameCurrentScene();
-    void deleteScene();
-    void recallScene(int index);
-    void stepScene(int delta);
-    void refreshSceneSelector();
-    void saveScenes();
-    void restoreScenes();
+    // Templates (Phase 4.5)
+    void captureTemplate();
+    void updateTemplate();
+    void renameCurrentTemplate();
+    void deleteTemplate();
+    void recallTemplate(int index);
+    void stepTemplate(int delta);
+    void refreshTemplateSelector();
+    void saveTemplates();
+    void restoreTemplates();
 
     // Control mapping UI (Phase 4.7)
     void armActionLearn(const ControlAction& action);
     void armExpressionLearn(int slotIndex, int paramIndex);
+    void bindingLearnComplete(const ControlTrigger& trigger, const ControlAction& action);
     void clearMappings();
     void updateControlLabel();
     void saveControlMap();
@@ -318,7 +320,7 @@ private:
     juce::Label metricsLabel;
     juce::Label paletteLabel        { {}, "LIBRARY" };
     juce::Label chainLabel          { {}, "SIGNAL CHAIN" };
-    juce::Label sceneLabel          { {}, "TEMPLATES" };
+    juce::Label templatesLabel      { {}, "TEMPLATES" };
     juce::Label controlSectionLabel { {}, "CONTROL" };
 
     juce::TextButton audioSettingsButton { "Audio Settings" };
@@ -327,15 +329,15 @@ private:
     juce::TextButton addButton           { "+ Add to Chain" };
     juce::TextButton savePresetButton    { "Save" };
     juce::TextButton loadPresetButton    { "Load" };
-    juce::TextButton captureSceneButton;
-    juce::TextButton updateSceneButton;
-    juce::TextButton renameSceneButton;
-    juce::TextButton deleteSceneButton;
-    juce::TextButton prevSceneButton;
-    juce::TextButton nextSceneButton;
+    juce::TextButton captureTemplateButton;
+    juce::TextButton updateTemplateButton;
+    juce::TextButton renameTemplateButton;
+    juce::TextButton deleteTemplateButton;
+    juce::TextButton prevTemplateButton;
+    juce::TextButton nextTemplateButton;
     juce::TooltipWindow tooltipWindow { this, 600 };
-    juce::ComboBox   sceneSelector;
-    juce::Label      sceneDirtyLabel;   // "●" shown when current chain differs from active scene
+    juce::ComboBox   templateSelector;
+    juce::Label      templateDirtyLabel;   // "●" shown when current chain differs from active template
 
     juce::TextButton addSectionStompButton  { "+ Stomp" };
     juce::TextButton addSectionPresetButton { "+ Preset" };
@@ -350,8 +352,6 @@ private:
     juce::TextButton muteButton           { "MUTE" };
 
     juce::Label      controlLabel;
-    juce::TextButton learnBypassButton       { "Learn Bypass" };
-    juce::TextButton learnPresetSelectButton { "Learn Preset Sel" };
     juce::TextButton learnExprButton         { "Learn Expression" };
     juce::TextButton clearMapsButton         { "Clear Maps" };
 
@@ -368,13 +368,13 @@ private:
     std::unique_ptr<ScanPathsWindow>     scanPathsWindow;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
-    // ── Scene dirty tracking ──────────────────────────────────────────────────
-    bool sceneDirty = false;
-    void setSceneDirty(bool dirty);
+    // ── Template dirty tracking ───────────────────────────────────────────────
+    bool templateDirty = false;
+    void setTemplateDirty(bool dirty);
 
     // ── Live control ───────────────────────────────────────────────────────────
     ControlMap controlMap;
-    SceneManager sceneManager;
+    TemplateManager templateManager;
     std::atomic<bool> midiLearnArmed { false };
     ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
     std::atomic<bool> expressionLearnArmed { false };
@@ -385,7 +385,7 @@ private:
     juce::ApplicationProperties appProperties;
     static constexpr const char* audioDeviceStateKey  = "audioDeviceState";
     static constexpr const char* lastPresetPathKey    = "lastPresetPath";
-    static constexpr const char* scenesStateKey       = "scenes";
+    static constexpr const char* templatesStateKey    = "scenes";   // keep "scenes" for backward compat
     static constexpr const char* controlMapStateKey   = "controlMap";
     static constexpr const char* pluginScanPathsKey   = "pluginScanPaths";
 

@@ -192,6 +192,7 @@ void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
     selected  = sel;
     isFirstInSection = row.isFirstInSection;
     isLastInSection  = row.isLastInSection;
+    controlHint = row.controlHint;
 
     const auto& info = row.slotInfo;
     name          = info.name;
@@ -242,16 +243,20 @@ void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
     if (e.mods.isRightButtonDown())
     {
         juce::PopupMenu menu;
-        menu.addItem(1, "Rename");
+        menu.addItem(1, "Learn Control");
+        menu.addSeparator();
+        menu.addItem(2, "Rename");
         if (hasCustomName)
-            menu.addItem(2, "Reset Name");
+            menu.addItem(3, "Reset Name");
 
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
             [this](int result)
             {
-                if (result == 1 && model.onRename)
+                if (result == 1 && model.onLearnControl)
+                    model.onLearnControl(slotIndex);
+                else if (result == 2 && model.onRename)
                     model.onRename(slotIndex);
-                else if (result == 2 && model.onResetName)
+                else if (result == 3 && model.onResetName)
                     model.onResetName(slotIndex);
             });
     }
@@ -324,13 +329,20 @@ void ChainSlotComponent::paint(juce::Graphics& g)
     g.setFont(juce::FontOptions(14.5f, bypassed ? juce::Font::plain : juce::Font::bold));
     g.drawText(name, nameArea, juce::Justification::bottomLeft);
 
-    g.setColour(tf::colour::textDim);
     g.setFont(juce::FontOptions(11.5f));
     juce::String sub = "[" + format + "]";
     if (hasCustomName)
         sub += "  " + originalName;
+    if (controlHint.isNotEmpty())
+    {
+        g.setColour(tf::colour::accent.withAlpha(0.75f));
+        // Draw hint right-aligned within the subtitle area before the bypassed tag
+        g.drawText(controlHint, a, juce::Justification::centredRight);
+        sub += "   ";
+    }
     if (bypassed)
-        sub += "   bypassed";
+        sub += "bypassed";
+    g.setColour(tf::colour::textDim);
     g.drawText(sub, a, juce::Justification::topLeft);
 }
 

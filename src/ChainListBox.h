@@ -22,6 +22,7 @@ struct ChainRow
     int  slotIndex         = -1;   // absolute index into the flat SlotList
     bool isFirstInSection  = false;
     bool isLastInSection   = false;
+    juce::String controlHint;      // e.g. "BYP: CC 5" or "ACT: Key 65" when a binding is learned
 };
 
 class ChainSlotComponent;
@@ -39,6 +40,7 @@ public:
     std::function<void(int)> onSelect;
     std::function<void(int)> onRename;
     std::function<void(int)> onResetName;
+    std::function<void(int)> onLearnControl;
 
     // Section-action callbacks (receive sectionId):
     std::function<void(int)>       onSectionMoveUp;
@@ -124,6 +126,8 @@ private:
     juce::String name, originalName, format;
     juce::Rectangle<int> textArea;
     juce::Rectangle<int> gripArea;
+
+    juce::String controlHint;
 
     bool dragStarted = false;
     static constexpr int kDragThreshold = 6;

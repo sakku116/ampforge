@@ -1,50 +1,50 @@
 # Guitar MultiFX Simulator
 
-Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/VST2. Berjalan di Windows.
+A real-time guitar multi-effects processor for Windows, built with JUCE and C++20. Hosts VST3 (and optionally VST2) plugins in a flexible, pedalboard-style signal chain.
 
-Dirancang sebagai pedalboard virtual — kamu bisa menyusun plugin efek dalam urutan yang kamu mau, mengatur bypass per-pedal, menyimpan preset, dan mengikat tombol MIDI atau keyboard ke aksi tertentu agar bisa dikontrol saat manggung.
-
----
-
-## Fitur Utama
-
-- **Signal chain** — susun plugin VST3/VST2 secara seri; drag-and-drop untuk ubah urutan
-- **Sections** — kelompokkan plugin menjadi *Stomp* (bypass independen) atau *Preset* (satu aktif sekaligus, seperti channel amp)
-- **Master controls** — input gain, output volume, dan mute global
-- **Templates** — simpan dan recall beberapa konfigurasi chain dengan nama
-- **Control mapping** — ikat keyboard atau MIDI (note/CC/footswitch) ke bypass/switch plugin
-- **Expression pedal** — ikat CC MIDI ke parameter plugin manapun
-- **Preset file** — simpan/muat snapshot chain ke file `.tfpreset`
-- **Scan aman** — plugin discan di proses terpisah agar plugin rusak tidak mematikan aplikasi
+Designed to replace a physical pedalboard on a desktop — arrange effects in any order, toggle bypass per pedal, save presets, and bind MIDI footswitches or keyboard keys to actions for live use.
 
 ---
 
-## Cara Pakai
+## Features
 
-Panduan lengkap ada di [docs/USER_GUIDE.md](docs/USER_GUIDE.md).
+- **Signal chain** — load VST3/VST2 plugins in series; drag and drop to reorder
+- **Sections** — group plugins into *Stomp* (independent bypass) or *Preset* (one active at a time, like amp channels)
+- **Master controls** — input gain, output volume, and global mute
+- **Templates** — save and recall multiple named chain configurations
+- **Control mapping** — bind keyboard keys or MIDI (note/CC/footswitch) to bypass or switch plugins
+- **Expression pedal** — map a MIDI CC to any plugin parameter
+- **Preset files** — save/load full chain snapshots to `.tfpreset` files
+- **Safe scanning** — each plugin is scanned in a separate process so a crashing plugin cannot take down the host
 
-Singkatnya:
-1. Build project (lihat bagian Setup di bawah)
-2. Jalankan `Guitar VST3 Host.exe`
-3. Plugin VST3 terdeteksi otomatis saat startup
-4. Drag plugin dari Library ke Signal Chain
-5. Mainkan gitar lewat audio interface kamu
+---
+
+## Usage
+
+See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full guide.
+
+Quick start:
+1. Build the project (see [Setup](#setup) below)
+2. Run `Guitar VST3 Host.exe`
+3. VST3 plugins are detected automatically on startup
+4. Drag plugins from the Library into the Signal Chain
+5. Play guitar through your audio interface
 
 ---
 
 ## Setup
 
-### Prasyarat
+### Requirements
 
-- **Windows 10/11**
-- **Visual Studio 2022** dengan workload *Desktop development with C++*
+- **Windows 10 or 11**
+- **Visual Studio 2022** with the *Desktop development with C++* workload
 - **CMake 3.22+**
-- Koneksi internet saat pertama configure (JUCE di-download otomatis via CMake)
+- Internet connection on first configure (JUCE is downloaded automatically via CMake)
 
 ### Build
 
 ```powershell
-# Clone repo
+# Clone the repo
 git clone <repo-url>
 cd guitar-multifx-simulator
 
@@ -55,46 +55,46 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug --parallel
 ```
 
-Atau pakai Makefile shortcut:
+Or use the Makefile shortcuts:
 
 ```powershell
-make build      # Debug
-make release    # Release
-make run        # Build + jalankan Debug
+make build      # Debug build
+make release    # Release build
+make run        # Build and run (Debug)
 ```
 
-Executable ada di `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe`.
+The executable is at `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe`.
 
-> **Catatan:** Dua file harus ada di folder yang sama — `Guitar VST3 Host.exe` dan `GuitarVST3ScanWorker.exe`. CMake mengurus salinannya secara otomatis saat build.
+> **Note:** Two files must exist in the same folder — `Guitar VST3 Host.exe` and `GuitarVST3ScanWorker.exe`. CMake copies the worker automatically after every build.
 
 ---
 
-## Setup ASIO (Opsional, Direkomendasikan)
+## ASIO Setup (Optional, Recommended)
 
-ASIO memberikan latency rendah yang jauh lebih baik dibanding WASAPI/DirectSound — sangat disarankan jika kamu pakai audio interface (Focusrite, Behringer, dll).
+ASIO provides significantly lower latency than WASAPI/DirectSound — strongly recommended if you use an audio interface (Focusrite, Behringer, etc.).
 
-### 1. Download Steinberg ASIO SDK
+### 1. Download the Steinberg ASIO SDK
 
-Kunjungi halaman resmi Steinberg dan download ASIO SDK (gratis, butuh registrasi akun):
+Get it from the official Steinberg page (free, requires account registration):
 
 👉 https://www.steinberg.net/asiosdk/
 
-Atau clone langsung:
+Or clone directly:
 
 ```powershell
 git clone https://github.com/audiosdk/asio.git asio
 ```
 
-### 2. Letakkan SDK di salah satu lokasi ini
+### 2. Place the SDK in one of these locations
 
-CMake mendeteksi secara otomatis dari beberapa lokasi:
+CMake detects it automatically from several locations:
 
-| Lokasi | Keterangan |
-|--------|------------|
-| `asio/` di root project | Paling mudah, lokal per-project |
-| `C:\ASIOSDK` | Global, bisa dipakai di banyak project |
+| Location | Notes |
+|----------|-------|
+| `asio/` in the project root | Easiest — local to this project |
+| `C:\ASIOSDK` | Global — shared across projects |
 
-Struktur folder yang diharapkan:
+Expected folder structure:
 ```
 asio/
   common/
@@ -103,38 +103,38 @@ asio/
     ...
 ```
 
-### 3. Rebuild CMake
+### 3. Reconfigure and rebuild
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug --parallel
 ```
 
-Kalau SDK terdeteksi, CMake akan menampilkan:
+If the SDK is detected, CMake will print:
 ```
 -- ASIO SDK found: <path>
 ```
 
-Setelah build, buka **Audio Settings** di aplikasi dan pilih driver ASIO milik audio interface kamu.
+After building, open **Audio Settings** in the app and select your audio interface's ASIO driver.
 
-> Folder `asio/` tidak di-commit ke repo ini (ada di `.gitignore`).
+> The `asio/` folder is not committed to this repo (listed in `.gitignore`).
 
 ---
 
-## Setup VST2 (Opsional)
+## VST2 Setup (Optional)
 
-Jika kamu punya plugin VST2 (format lama), dukungannya bisa diaktifkan dengan menambahkan Steinberg VST2 SDK.
+If you have VST2 plugins (older format), support can be enabled by providing the Steinberg VST2 SDK.
 
-> Steinberg sudah menghentikan distribusi resmi VST2 SDK. Kamu bisa mendapatkannya dari VST3 SDK yang menyertakan wrapper kompatibel di `public.sdk/source/vst2.x/`.
+> Steinberg has discontinued official VST2 SDK distribution. You can obtain it from the VST3 SDK which includes a compatibility wrapper under `public.sdk/source/vst2.x/`.
 
-### Letakkan SDK di salah satu lokasi ini
+### Place the SDK in one of these locations
 
-| Lokasi | Keterangan |
-|--------|------------|
-| `vst2sdk/` di root project | Lokal per-project |
+| Location | Notes |
+|----------|-------|
+| `vst2sdk/` in the project root | Local to this project |
 | `C:\VST2_SDK` | Global |
 
-Struktur yang diharapkan:
+Expected structure:
 ```
 vst2sdk/
   pluginterfaces/
@@ -143,14 +143,14 @@ vst2sdk/
       aeffectx.h
 ```
 
-### Rebuild CMake
+### Reconfigure and rebuild
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Debug --parallel
 ```
 
-Kalau SDK terdeteksi:
+If the SDK is detected:
 ```
 -- VST2 SDK found: <path>
 ```
@@ -159,33 +159,33 @@ Kalau SDK terdeteksi:
 
 ## Troubleshooting
 
-| Gejala | Solusi |
-|--------|--------|
-| Plugin tidak muncul | Klik **Rescan Plugins**; tambah folder kustom via **Scan Paths...** |
-| Tidak ada suara | Cek Audio Settings, pastikan device input/output benar |
-| Latency tinggi | Aktifkan ASIO (lihat setup di atas), kecilkan buffer size |
-| "Couldn't open input device" | Sambungkan audio interface, atau buka Audio Settings |
-| Plugin crash saat scan | Normal — scan worker mengisolasi crash; lihat log untuk detail |
+| Symptom | Solution |
+|---------|----------|
+| Plugins not showing up | Click **Rescan Plugins**; add custom folders via **Scan Paths...** |
+| No audio output | Check Audio Settings — make sure the correct input/output device is selected |
+| High latency | Enable ASIO (see setup above) and reduce buffer size |
+| "Couldn't open input device" | Connect your audio interface, or open Audio Settings |
+| Plugin crashes during scan | Expected — the scan worker isolates crashes; check the log for details |
 
 **Log file:** `%APPDATA%\GtrFxSim\host.log`
 
 ---
 
-## Struktur Project
+## Project Structure
 
 ```
-src/              Seluruh source code C++
-docs/             Dokumentasi tambahan (USER_GUIDE.md)
-build/            Output build (di-generate CMake, tidak di-commit)
-asio/             Steinberg ASIO SDK (opsional, tidak di-commit)
-vst2sdk/          Steinberg VST2 SDK (opsional, tidak di-commit)
-CMakeLists.txt    Konfigurasi build
-Makefile          Shortcut build command
-CLAUDE.md         Konteks project untuk AI assistant
+src/              All C++ source code
+docs/             Additional documentation (USER_GUIDE.md)
+build/            Build output (generated by CMake, not committed)
+asio/             Steinberg ASIO SDK (optional, not committed)
+vst2sdk/          Steinberg VST2 SDK (optional, not committed)
+CMakeLists.txt    Build configuration
+Makefile          Build command shortcuts
+CLAUDE.md         Project context for AI assistants
 ```
 
 ---
 
-## Lisensi
+## License
 
-Untuk penggunaan pribadi. JUCE digunakan di bawah lisensinya sendiri (lihat [juce.com](https://juce.com/juce-privacy-policy)).
+For personal use. JUCE is used under its own license — see [juce.com](https://juce.com/juce-privacy-policy).

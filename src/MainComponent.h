@@ -326,6 +326,9 @@ private:
     juce::TextButton audioSettingsButton { "Audio Settings" };
     juce::TextButton scanButton          { "Rescan Plugins" };
     juce::TextButton scanPathsButton     { "Scan Paths..." };
+
+    juce::ComboBox   formatFilterCombo;
+    juce::TextEditor searchBox;
     juce::TextButton addButton           { "+ Add to Chain" };
     juce::TextButton savePresetButton    { "Save" };
     juce::TextButton loadPresetButton    { "Load" };
@@ -356,6 +359,7 @@ private:
     juce::TextButton clearMapsButton         { "Clear Maps" };
 
     juce::StringArray paletteNames;
+    juce::Array<juce::PluginDescription> filteredPlugins;
     SimpleListModel paletteModel { paletteNames };
     ChainListModel  chainModel;
     juce::ListBox     paletteListBox;

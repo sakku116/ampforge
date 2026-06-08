@@ -1,6 +1,7 @@
 ﻿#include "MainComponent.h"
 #include "HostDebug.h"
 #include "Preset.h"
+#include <algorithm>
 
 MainComponent::MainComponent()
     : audioEngine(pluginHost),
@@ -40,6 +41,19 @@ MainComponent::MainComponent()
     chainListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
     addAndMakeVisible(paletteListBox);
     addAndMakeVisible(chainListBox);
+
+    formatFilterCombo.addItem("All",  1);
+    formatFilterCombo.addItem("VST3", 2);
+    formatFilterCombo.addItem("VST2", 3);
+    formatFilterCombo.setSelectedId(1, juce::dontSendNotification);
+    formatFilterCombo.setTooltip("Filter by plugin format");
+    formatFilterCombo.onChange = [this] { refreshPaletteList(); };
+    addAndMakeVisible(formatFilterCombo);
+
+    searchBox.setTextToShowWhenEmpty("Search...", juce::Colours::grey);
+    searchBox.setFont(juce::FontOptions(13.0f));
+    searchBox.onTextChange = [this] { refreshPaletteList(); };
+    addAndMakeVisible(searchBox);
 
     // Double-click a library item to add it; the chain rows carry their own buttons.
     paletteModel.onDoubleClick = [this](int) { addSelectedToChain(); };
@@ -408,6 +422,13 @@ void MainComponent::resized()
         auto in = libraryPanel.reduced(12);
         paletteLabel.setBounds(in.removeFromTop(20));
         in.removeFromTop(6);
+
+        auto filterRow = in.removeFromTop(26);
+        formatFilterCombo.setBounds(filterRow.removeFromLeft(72));
+        filterRow.removeFromLeft(4);
+        searchBox.setBounds(filterRow);
+        in.removeFromTop(4);
+
         addButton.setBounds(in.removeFromBottom(rowH));
         in.removeFromBottom(8);
         paletteListBox.setBounds(in);
@@ -904,11 +925,43 @@ void MainComponent::timerCallback()
 void MainComponent::refreshPaletteList()
 {
     paletteNames.clear();
+    filteredPlugins.clear();
+
+    const int  selectedFormat = formatFilterCombo.getSelectedId(); // 1=All 2=VST3 3=VST2
+    const auto searchText     = searchBox.getText().trim().toLowerCase();
+
+    juce::Array<juce::PluginDescription> vst3List, otherList;
+    juce::StringArray seen; // dedup key: "Format|name" — guards against same DLL via two paths
 
     for (const auto& type : pluginScanner.getKnownPluginList().getTypes())
-        paletteNames.add(type.name + " [" + type.pluginFormatName + "]");
+    {
+        if (selectedFormat == 2 && type.pluginFormatName != "VST3") continue;
+        if (selectedFormat == 3 && type.pluginFormatName != "VST")  continue;
+        if (searchText.isNotEmpty() && ! type.name.toLowerCase().contains(searchText)) continue;
 
-    HostDebug::log("Palette refreshed: " + juce::String(paletteNames.size()) + " plugin(s)");
+        const auto key = type.pluginFormatName + "|" + type.name;
+        if (seen.contains(key)) continue;
+        seen.add(key);
+
+        if (type.pluginFormatName == "VST3")
+            vst3List.add(type);
+        else
+            otherList.add(type);
+    }
+
+    auto byName = [](const juce::PluginDescription& a, const juce::PluginDescription& b)
+    { return a.name.compareIgnoreCase(b.name) < 0; };
+    std::sort(vst3List.begin(),  vst3List.end(),  byName);
+    std::sort(otherList.begin(), otherList.end(), byName);
+
+    for (auto& p : vst3List)  filteredPlugins.add(p);
+    for (auto& p : otherList) filteredPlugins.add(p);
+
+    for (const auto& p : filteredPlugins)
+        paletteNames.add(p.name + " [" + p.pluginFormatName + "]");
+
+    HostDebug::log("Palette refreshed: " + juce::String(filteredPlugins.size()) + " shown / "
+                   + juce::String(pluginScanner.getKnownPluginList().getNumTypes()) + " total");
 
     paletteListBox.updateContent();
     paletteListBox.repaint();
@@ -1031,15 +1084,14 @@ int MainComponent::getTargetSectionId() const
 void MainComponent::addSelectedToChain()
 {
     const auto row = getSelectedPaletteRow();
-    const auto& types = pluginScanner.getKnownPluginList().getTypes();
 
-    if (! juce::isPositiveAndBelow(row, types.size()))
+    if (! juce::isPositiveAndBelow(row, filteredPlugins.size()))
     {
         HostDebug::log("UI: Add clicked — no palette selection");
         return;
     }
 
-    const auto description = types[row];
+    const auto description = filteredPlugins[row];
     const int  sectionId   = getTargetSectionId();
     HostDebug::log("UI: Add to chain — " + description.name + " (section=" + juce::String(sectionId) + ")");
 

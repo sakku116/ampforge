@@ -385,6 +385,7 @@ float PluginChain::getSectionPeakLevel(int sectionId) const
 
 void PluginChain::clear()
 {
+    cancelAsyncBuild();   // discard any in-progress async load
     const juce::ScopedLock sl(editLock);
     publish(std::make_shared<SlotList>());
 }
@@ -597,6 +598,7 @@ std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<
 
 bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
 {
+    cancelAsyncBuild();   // discard any in-progress async load
     bool allOk = false;
     auto next = buildList(specs, allOk);
 
@@ -631,6 +633,8 @@ bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int cr
 bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs,
                               const juce::Array<SectionDef>& sections)
 {
+    cancelAsyncBuild();   // discard any in-progress async load
+
     // Replace section definitions first (message-thread only, no lock needed yet).
     sectionDefs.clear();
     for (const auto& s : sections)
@@ -747,6 +751,129 @@ void PluginChain::releasePreload(int handle)
 {
     const juce::ScopedLock sl(editLock);
     preloaded.erase(handle);
+}
+
+void PluginChain::buildChainAsync(const juce::Array<SlotSpec>& specs,
+                                   const juce::Array<SectionDef>& sections,
+                                   std::function<void(int, int)> onProgress,
+                                   std::function<void(int, bool)> onComplete)
+{
+    asyncEpoch.fetch_add(1);
+    asyncState = std::make_unique<AsyncBuildState>();
+    asyncState->specs          = specs;
+    asyncState->targetSections = sections;
+    asyncState->partial        = std::make_shared<SlotList>();
+    asyncState->index          = 0;
+    asyncState->allOk          = true;
+    asyncState->epoch          = asyncEpoch.load();
+    asyncState->onProgress     = std::move(onProgress);
+    asyncState->onComplete     = std::move(onComplete);
+
+    juce::MessageManager::callAsync([this] { stepAsyncBuild(); });
+}
+
+void PluginChain::cancelAsyncBuild()
+{
+    asyncEpoch.fetch_add(1);
+    asyncState.reset();
+}
+
+void PluginChain::stepAsyncBuild()
+{
+    if (! asyncState || asyncState->epoch != asyncEpoch.load())
+        return;   // cancelled
+
+    auto& state = *asyncState;
+
+    if (state.index >= state.specs.size())
+    {
+        // All slots built. Commit sectionDefs and store as preloaded.
+        sectionDefs.clear();
+        for (const auto& s : state.targetSections)
+            sectionDefs.push_back(s);
+        if (sectionDefs.empty())
+            sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
+
+        nextSectionId   = 1;
+        nextStompCount  = 0;
+        nextPresetCount = 0;
+        for (const auto& def : sectionDefs)
+        {
+            nextSectionId = std::max(nextSectionId, def.id + 1);
+            if (def.type == SectionDef::Type::stomp) ++nextStompCount;
+            else                                     ++nextPresetCount;
+        }
+
+        int handle;
+        {
+            const juce::ScopedLock sl(editLock);
+            handle = nextPreloadHandle++;
+            preloaded[handle] = state.partial;
+        }
+
+        auto onComplete = std::move(state.onComplete);
+        const bool allOk = state.allOk;
+        asyncState.reset();
+
+        HostDebug::log("Async chain build complete: handle=" + juce::String(handle)
+                       + " allOk=" + juce::String((int) allOk));
+
+        if (onComplete) onComplete(handle, allOk);
+        return;
+    }
+
+    const auto& spec = state.specs[state.index];
+    juce::String error;
+    auto slot = createSlot(spec.description, error);
+
+    if (slot != nullptr)
+    {
+        if (spec.state.getSize() > 0)
+            slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
+
+        slot->bypassed .store(spec.bypassed);
+        slot->postGain .store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
+        slot->customName = spec.customName;
+
+        if (spec.slotId > 0)
+        {
+            slot->slotId = spec.slotId;
+            nextSlotId   = std::max(nextSlotId, spec.slotId + 1);
+        }
+        else
+        {
+            slot->slotId = nextSlotId++;
+        }
+
+        // Validate sectionId against the target sections (not yet committed to sectionDefs).
+        const auto& targetSects = state.targetSections;
+        bool validSec = false;
+        for (const auto& def : targetSects)
+        {
+            if (def.id == spec.sectionId)
+            {
+                validSec = true;
+                slot->sectionBypassed.store(def.bypassed);
+                break;
+            }
+        }
+        slot->sectionId = validSec ? spec.sectionId
+                                   : (targetSects.isEmpty() ? 1 : targetSects[0].id);
+
+        state.partial->push_back(std::move(slot));
+    }
+    else
+    {
+        HostDebug::log("Async chain build: slot FAILED " + spec.description.name + " — " + error);
+        state.allOk = false;
+    }
+
+    state.index++;
+
+    if (state.onProgress)
+        state.onProgress(state.index, state.specs.size());
+
+    juce::MessageManager::callAsync([this] { stepAsyncBuild(); });
 }
 
 int PluginChain::getNumSlots() const

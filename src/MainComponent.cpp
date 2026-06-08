@@ -42,6 +42,13 @@ MainComponent::MainComponent()
     addAndMakeVisible(paletteListBox);
     addAndMakeVisible(chainListBox);
 
+    chainLoadingLabel.setJustificationType(juce::Justification::centred);
+    chainLoadingLabel.setFont(juce::FontOptions(13.5f, juce::Font::bold));
+    chainLoadingLabel.setColour(juce::Label::backgroundColourId, tf::colour::background.withAlpha(0.88f));
+    chainLoadingLabel.setColour(juce::Label::textColourId, tf::colour::text);
+    chainLoadingLabel.setVisible(false);
+    addAndMakeVisible(chainLoadingLabel);
+
     formatFilterCombo.addItem("All",  1);
     formatFilterCombo.addItem("VST3", 2);
     formatFilterCombo.addItem("VST2", 3);
@@ -273,11 +280,21 @@ MainComponent::MainComponent()
 
         if (juce::isPositiveAndBelow(activeScene, templateManager.getNumScenes()))
         {
-            // Active scene takes priority: rebuild immediately (no crossfade from empty chain).
+            // Active scene takes priority: load async so the UI stays responsive.
             const auto& scene = templateManager.getScene(activeScene);
-            pluginHost.rebuildChain(scene.specs, scene.sections);
-            refreshChainList();
-            HostDebug::log("Startup: applied template " + juce::String(activeScene));
+            setChainLoading(true, 0, scene.specs.size());
+            pluginHost.getChain().buildChainAsync(
+                scene.specs, scene.sections,
+                [this](int loaded, int total) { setChainLoading(true, loaded, total); },
+                [this, activeScene](int handle, bool allOk)
+                {
+                    if (handle > 0)
+                        pluginHost.getChain().activateChain(handle, 0);
+                    setChainLoading(false, 0, 0);
+                    refreshChainList();
+                    HostDebug::log("Startup: applied template " + juce::String(activeScene)
+                                   + " (allOk=" + juce::String((int) allOk) + ")");
+                });
         }
         else
         {
@@ -453,6 +470,7 @@ void MainComponent::resized()
         in.removeFromTop(4);
 
         chainListBox.setBounds(in);
+        chainLoadingLabel.setBounds(in);   // overlay on top of chain list
     }
 }
 
@@ -679,11 +697,21 @@ void MainComponent::recallTemplate(int index)
 
     templateManager.setCurrentIndex(index);
     const auto& scene = templateManager.getScene(index);
-    pluginHost.switchChainWithCrossfade(scene.specs, scene.sections, 25);
-    refreshChainList();
-    refreshTemplateSelector();
-    setTemplateDirty(false);
-    HostDebug::log("Template recalled: index " + juce::String(index));
+
+    pluginHost.cancelPendingSwitch();
+    setChainLoading(true, 0, scene.specs.size());
+
+    pluginHost.switchChainAsync(
+        scene.specs, scene.sections, 25,
+        [this, index](bool allOk)
+        {
+            setChainLoading(false, 0, 0);
+            refreshChainList();
+            refreshTemplateSelector();
+            setTemplateDirty(false);
+            HostDebug::log("Template recalled: index " + juce::String(index)
+                           + " (allOk=" + juce::String((int) allOk) + ")");
+        });
 }
 
 void MainComponent::stepTemplate(int delta)
@@ -839,6 +867,21 @@ void MainComponent::setTemplateDirty(bool dirty)
         updateTemplateButton.removeColour(juce::TextButton::buttonColourId);
         updateTemplateButton.removeColour(juce::TextButton::textColourOffId);
     }
+}
+
+void MainComponent::setChainLoading(bool loading, int loaded, int total)
+{
+    chainIsLoading = loading;
+    chainLoadingLabel.setVisible(loading);
+
+    if (loading)
+        chainLoadingLabel.setText("Loading " + juce::String(loaded) + " / " + juce::String(total) + " plugins...",
+                                  juce::dontSendNotification);
+
+    // Disable template navigation while loading to prevent queued switches.
+    prevTemplateButton.setEnabled(! loading);
+    nextTemplateButton.setEnabled(! loading);
+    templateSelector.setEnabled(! loading);
 }
 
 void MainComponent::saveControlMap()

@@ -108,6 +108,18 @@ public:
     bool activateChain(int handle, int crossfadeMs);
     void releasePreload(int handle);
 
+    /** Incremental async build: loads one plugin per message dispatch so the UI stays
+        responsive. onProgress(loaded, total) is called after each slot. onComplete(handle,
+        allOk) is called on the message thread when all slots are done; the caller should
+        pass handle to activateChain() to make the chain live. Cancels any in-progress
+        async build first. */
+    void buildChainAsync(const juce::Array<SlotSpec>& specs,
+                         const juce::Array<SectionDef>& sections,
+                         std::function<void(int /*loaded*/, int /*total*/)> onProgress,
+                         std::function<void(int /*handle*/, bool /*allOk*/)> onComplete);
+    /** Cancels any in-progress async build. The partially-built chain is discarded. */
+    void cancelAsyncBuild();
+
     // ── Queries (message thread) ─────────────────────────────────────────────
     int getNumSlots() const;
     juce::Array<SlotInfo> getSlotInfos() const;
@@ -175,6 +187,22 @@ private:
 
     std::map<int, std::shared_ptr<SlotList>> preloaded;   // message-thread: chains built ahead
     int nextPreloadHandle = 1;
+
+    struct AsyncBuildState
+    {
+        juce::Array<SlotSpec>    specs;
+        juce::Array<SectionDef>  targetSections;
+        std::shared_ptr<SlotList> partial;
+        int  index  = 0;
+        bool allOk  = true;
+        int  epoch  = 0;
+        std::function<void(int, int)> onProgress;
+        std::function<void(int, bool)> onComplete;
+    };
+    std::unique_ptr<AsyncBuildState> asyncState;   // message-thread only
+    std::atomic<int> asyncEpoch { 0 };
+
+    void stepAsyncBuild();   // callAsync dispatch handler
 
     // audio-thread only:
     juce::AudioBuffer<float> fadeScratch;

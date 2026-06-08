@@ -1,4 +1,4 @@
-- [ ] sebelumnya aku minta AI untuk rename wording Scene pada scenes selector menjadi template, make sure nama component dan file juga dirubah jika belum
-- [ ] change default template name to "Template {num}", not "Scene {num}"
-- [ ] 'learn bypass', 'learn preset sel not working, make sure when plugin moved to other section type (stomp/preset) it still working based on section behavior. add error warning when user input duplicate key to learn.
-- [ ] show the learned key / cc in the signal chain plugin row
+- [X] sebelumnya aku minta AI untuk rename wording Scene pada scenes selector menjadi template, make sure nama component dan file juga dirubah jika belum
+- [X] change default template name to "Template {num}", not "Scene {num}"
+- [X] 'learn bypass', 'learn preset sel not working, make sure when plugin moved to other section type (stomp/preset) it still working based on section behavior. add error warning when user input duplicate key to learn.
+- [X] show the learned key / cc in the signal chain plugin row

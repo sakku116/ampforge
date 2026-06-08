@@ -65,6 +65,16 @@ public:
     bool activatePreloaded(int handle, int crossfadeMs) { closeAllEditors(); return chain.activateChain(handle, crossfadeMs); }
     void releasePreload(int handle) { chain.releasePreload(handle); }
 
+    /** Async version of switchChainWithCrossfade: returns immediately. Loads plugins one
+        per message dispatch to keep the UI responsive. onComplete(allOk) is called on the
+        message thread when the chain is live. Cancels any previous pending switch. */
+    void switchChainAsync(const juce::Array<PluginChain::SlotSpec>& specs,
+                          const juce::Array<PluginChain::SectionDef>& sections,
+                          int crossfadeMs,
+                          std::function<void(bool)> onComplete);
+    /** Cancels any in-progress async switch. The current chain remains active. */
+    void cancelPendingSwitch();
+
     // ── Editor ───────────────────────────────────────────────────────────────
     void openEditorWindow(int index);
     void closeAllEditors();

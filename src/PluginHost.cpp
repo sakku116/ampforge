@@ -108,6 +108,29 @@ bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpe
     return chain.switchWithCrossfade(specs, sections, crossfadeMs);
 }
 
+void PluginHost::switchChainAsync(const juce::Array<PluginChain::SlotSpec>& specs,
+                                  const juce::Array<PluginChain::SectionDef>& sections,
+                                  int crossfadeMs,
+                                  std::function<void(bool)> onComplete)
+{
+    closeAllEditors();
+    chain.buildChainAsync(
+        specs, sections,
+        nullptr,   // onProgress — MainComponent accesses chain directly via getChain()
+        [this, crossfadeMs, onComplete](int handle, bool allOk)
+        {
+            if (handle > 0)
+                chain.activateChain(handle, crossfadeMs);
+            if (onComplete)
+                onComplete(allOk);
+        });
+}
+
+void PluginHost::cancelPendingSwitch()
+{
+    chain.cancelAsyncBuild();
+}
+
 // ── Editor ─────────────────────────────────────────────────────────────────
 void PluginHost::openEditorWindow(int index)
 {

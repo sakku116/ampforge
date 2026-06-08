@@ -376,6 +376,11 @@ private:
     bool templateDirty = false;
     void setTemplateDirty(bool dirty);
 
+    // ── Async chain loading state ─────────────────────────────────────────────
+    bool chainIsLoading = false;
+    juce::Label chainLoadingLabel;
+    void setChainLoading(bool loading, int loaded, int total);
+
     // ── Live control ───────────────────────────────────────────────────────────
     ControlMap controlMap;
     TemplateManager templateManager;

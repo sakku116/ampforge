@@ -42,6 +42,14 @@ MainComponent::MainComponent()
     addAndMakeVisible(paletteListBox);
     addAndMakeVisible(chainListBox);
 
+    chainHorizontalView.setVisible(false);
+    chainHorizontalView.onMovePlugin = [this](int f, int t, int s) { moveSlotAt(f, t, s); };
+    addAndMakeVisible(chainHorizontalView);
+
+    chainViewToggleButton.setTooltip("Toggle horizontal / vertical chain view");
+    chainViewToggleButton.addListener(this);
+    addAndMakeVisible(chainViewToggleButton);
+
     chainLoadingLabel.setJustificationType(juce::Justification::centred);
     chainLoadingLabel.setFont(juce::FontOptions(13.5f, juce::Font::bold));
     chainLoadingLabel.setColour(juce::Label::backgroundColourId, tf::colour::background.withAlpha(0.88f));
@@ -256,6 +264,33 @@ MainComponent::MainComponent()
     };
     addAndMakeVisible(muteButton);
 
+    masterInputMeter.getLevel  = [this] { return audioEngine.getMasterInputPeakLevel(); };
+    masterOutputMeter.getLevel = [this] { return audioEngine.getMasterOutputPeakLevel(); };
+    addAndMakeVisible(masterInputMeter);
+    addAndMakeVisible(masterOutputMeter);
+
+    inputChLabel.setFont(juce::FontOptions(12.0f));
+    inputChLabel.setColour(juce::Label::textColourId, tf::colour::text.withAlpha(0.85f));
+    inputChLabel.setTooltip("ASIO input channel routed to the plugin chain (mono)");
+    addAndMakeVisible(inputChLabel);
+
+    inputChannelCombo.setTooltip("Select which physical input channel is fed into the plugin chain");
+    inputChannelCombo.onChange = [this]
+    {
+        const int idx = inputChannelCombo.getSelectedItemIndex();
+        if (idx >= 0)
+        {
+            audioEngine.setInputChannelIndex(idx);
+            saveInputChannel();
+        }
+    };
+    addAndMakeVisible(inputChannelCombo);
+
+    audioEngine.onDeviceChanged = [this]
+    {
+        juce::MessageManager::callAsync([this] { refreshInputChannelCombo(); });
+    };
+
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
@@ -264,6 +299,8 @@ MainComponent::MainComponent()
     startTimerHz(10);   // performance metrics refresh
 
     restoreScanPaths();
+    restoreChainViewMode();
+    restoreInputChannel();
 
     HostDebug::log("MainComponent ready — scheduling plugin scan");
 
@@ -315,8 +352,8 @@ MainComponent::~MainComponent()
                      &captureTemplateButton, &updateTemplateButton, &renameTemplateButton,
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
                      &addSectionStompButton, &addSectionPresetButton,
-                     &learnExprButton,
-                     &clearMapsButton })
+                     &learnExprButton, &clearMapsButton,
+                     &chainViewToggleButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
@@ -362,7 +399,7 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    const int pad = 14, gap = 10, rowH = 34, footerH = 140;
+    const int pad = 14, gap = 10, rowH = 34, footerH = 175;
     auto area = getLocalBounds().reduced(pad);
 
     // ── Header bar (title + live metrics) ─────────────────────────────────────
@@ -418,8 +455,19 @@ void MainComponent::resized()
         outputVolResetButton.setBounds(masterRow.removeFromLeft(24));
         masterRow.removeFromLeft(8);
         muteButton          .setBounds(masterRow.removeFromLeft(60));
+        masterRow.removeFromLeft(12);
+        inputChLabel        .setBounds(masterRow.removeFromLeft(38));
+        inputChannelCombo   .setBounds(masterRow.removeFromLeft(120));
 
-        f.removeFromTop(8);
+        // ── Level meter row (aligns under input/output sliders) ───────────────
+        f.removeFromTop(4);
+        auto meterRow = f.removeFromTop(30);
+        meterRow.removeFromLeft(70 + 50);          // align under inputGainLabel+slider
+        masterInputMeter .setBounds(meterRow.removeFromLeft(110 + 24));
+        meterRow.removeFromLeft(8 + 50);           // gap + outputVolLabel
+        masterOutputMeter.setBounds(meterRow.removeFromLeft(110 + 24));
+
+        f.removeFromTop(6);
 
         auto controlRow = f.removeFromTop(rowH);
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
@@ -454,11 +502,14 @@ void MainComponent::resized()
     {
         auto in = chainPanel.reduced(12);
 
-        // Header row: "SIGNAL CHAIN" label + Save/Load preset buttons.
+        // Header row: "SIGNAL CHAIN" label + Save/Load preset buttons + view toggle.
         auto headRow = in.removeFromTop(28);
         loadPresetButton.setBounds(headRow.removeFromRight(78));
         headRow.removeFromRight(6);
         savePresetButton.setBounds(headRow.removeFromRight(78));
+        headRow.removeFromRight(6);
+        chainViewToggleButton.setBounds(headRow.removeFromRight(28));
+        headRow.removeFromRight(6);
         chainLabel.setBounds(headRow.withTrimmedTop(4));
         in.removeFromTop(4);
 
@@ -470,12 +521,22 @@ void MainComponent::resized()
         in.removeFromTop(4);
 
         chainListBox.setBounds(in);
+        chainHorizontalView.setBounds(in);
         chainLoadingLabel.setBounds(in);   // overlay on top of chain list
     }
 }
 
 void MainComponent::buttonClicked(juce::Button* button)
 {
+    if (button == &chainViewToggleButton)
+    {
+        chainHorizontalMode = ! chainHorizontalMode;
+        applyChainViewMode();
+        saveChainViewMode();
+        refreshChainList();
+        return;
+    }
+
     if (button == &audioSettingsButton) { openAudioSettings(); return; }
 
     if (button == &scanButton)
@@ -951,6 +1012,73 @@ void MainComponent::restoreScanPaths()
     HostDebug::log("Scan paths restored: " + juce::String(paths.size()) + " path(s)");
 }
 
+void MainComponent::applyChainViewMode()
+{
+    chainListBox       .setVisible(! chainHorizontalMode);
+    chainHorizontalView.setVisible(  chainHorizontalMode);
+    chainViewToggleButton.setButtonText(
+        chainHorizontalMode
+            ? juce::String::fromUTF8("\xE2\x86\x95")   // ↕  (click to go vertical)
+            : juce::String::fromUTF8("\xE2\x86\x94")); // ↔  (click to go horizontal)
+}
+
+void MainComponent::restoreChainViewMode()
+{
+    if (auto* settings = appProperties.getUserSettings())
+        chainHorizontalMode = settings->getBoolValue(chainViewModeKey, false);
+    applyChainViewMode();
+}
+
+void MainComponent::saveChainViewMode()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        settings->setValue(chainViewModeKey, chainHorizontalMode);
+        settings->saveIfNeeded();
+    }
+}
+
+void MainComponent::refreshInputChannelCombo()
+{
+    const auto names = audioEngine.getInputChannelNames();
+    const int prevIdx = audioEngine.getInputChannelIndex();
+
+    inputChannelCombo.clear(juce::dontSendNotification);
+
+    if (names.isEmpty())
+    {
+        inputChannelCombo.addItem("(no inputs)", 1);
+        inputChannelCombo.setSelectedItemIndex(0, juce::dontSendNotification);
+        return;
+    }
+
+    for (int i = 0; i < names.size(); ++i)
+        inputChannelCombo.addItem(names[i], i + 1);
+
+    const int clampedIdx = juce::jlimit(0, names.size() - 1, prevIdx);
+    inputChannelCombo.setSelectedItemIndex(clampedIdx, juce::dontSendNotification);
+    audioEngine.setInputChannelIndex(clampedIdx);
+}
+
+void MainComponent::restoreInputChannel()
+{
+    int idx = 0;
+    if (auto* settings = appProperties.getUserSettings())
+        idx = settings->getIntValue(inputChannelIndexKey, 0);
+
+    audioEngine.setInputChannelIndex(idx);
+    // combo will be populated when onDeviceChanged fires after audioEngine.start()
+}
+
+void MainComponent::saveInputChannel()
+{
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        settings->setValue(inputChannelIndexKey, audioEngine.getInputChannelIndex());
+        settings->saveIfNeeded();
+    }
+}
+
 void MainComponent::timerCallback()
 {
     updateControlLabel();
@@ -1073,6 +1201,7 @@ void MainComponent::refreshChainList()
 
     chainModel.setRows(rows);
     chainListBox.updateContent();
+    chainHorizontalView.setRows(rows);
 
     if (juce::isPositiveAndBelow(selectedRow, rows.size()))
         chainListBox.selectRow(selectedRow, juce::dontSendNotification);

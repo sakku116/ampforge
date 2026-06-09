@@ -353,6 +353,11 @@ private:
     juce::Label      outputVolLabel       { {}, "Out Vol" };
     juce::TextButton outputVolResetButton;
     juce::TextButton muteButton           { "MUTE" };
+    juce::Label      inputChLabel         { {}, "In Ch" };
+    juce::ComboBox   inputChannelCombo;
+
+    LevelMeterBar    masterInputMeter;
+    LevelMeterBar    masterOutputMeter;
 
     juce::Label      controlLabel;
     juce::TextButton learnExprButton         { "Learn Expression" };
@@ -361,9 +366,12 @@ private:
     juce::StringArray paletteNames;
     juce::Array<juce::PluginDescription> filteredPlugins;
     SimpleListModel paletteModel { paletteNames };
-    ChainListModel  chainModel;
-    juce::ListBox     paletteListBox;
-    ChainListBoxView  chainListBox { chainModel };
+    ChainListModel      chainModel;
+    juce::ListBox       paletteListBox;
+    ChainListBoxView    chainListBox        { chainModel };
+    ChainHorizontalView chainHorizontalView { chainModel };
+    juce::TextButton    chainViewToggleButton;
+    bool                chainHorizontalMode = false;
 
     // Panel backgrounds, computed in resized() and drawn in paint().
     juce::Rectangle<int> headerPanel, libraryPanel, chainPanel, footerPanel;
@@ -397,6 +405,16 @@ private:
     static constexpr const char* templatesStateKey    = "scenes";   // keep "scenes" for backward compat
     static constexpr const char* controlMapStateKey   = "controlMap";
     static constexpr const char* pluginScanPathsKey   = "pluginScanPaths";
+    static constexpr const char* chainViewModeKey     = "chainViewMode";
+    static constexpr const char* inputChannelIndexKey = "inputChannelIndex";
+
+    void restoreChainViewMode();
+    void saveChainViewMode();
+    void applyChainViewMode();
+
+    void refreshInputChannelCombo();
+    void restoreInputChannel();
+    void saveInputChannel();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };

@@ -103,14 +103,24 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     processingBuffer.clear();
 
     const float inGain = masterInputGain.load();
+    const int selCh = juce::jlimit(0, juce::jmax(numInputChannels - 1, 0),
+                                   inputChannelIndex.load());
     for (int ch = 0; ch < channelsToUse; ++ch)
     {
-        if (ch < numInputChannels && inputChannelData[ch] != nullptr)
+        if (selCh < numInputChannels && inputChannelData[selCh] != nullptr)
         {
-            processingBuffer.copyFrom(ch, 0, inputChannelData[ch], numSamples);
+            processingBuffer.copyFrom(ch, 0, inputChannelData[selCh], numSamples);
             if (inGain != 1.0f)
                 processingBuffer.applyGain(ch, 0, numSamples, inGain);
         }
+    }
+
+    // Measure post-input-gain peak (enters the plugin chain).
+    {
+        float pk = 0.0f;
+        for (int ch = 0; ch < channelsToUse; ++ch)
+            pk = juce::jmax(pk, processingBuffer.getMagnitude(ch, 0, numSamples));
+        masterInputPeakLevel.store(pk);
     }
 
     midiBuffer.clear();
@@ -139,6 +149,14 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
                 juce::FloatVectorOperations::multiply(outputChannelData[ch], outGain, numSamples);
         }
     }
+
+    // Measure post-output-gain peak (after chain + output gain).
+    {
+        float pk = 0.0f;
+        for (int ch = 0; ch < juce::jmin(numOutputChannels, channelsToUse); ++ch)
+            pk = juce::jmax(pk, processingBuffer.getMagnitude(ch, 0, numSamples));
+        masterOutputPeakLevel.store(pk * outGain);
+    }
 }
 
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
@@ -160,17 +178,33 @@ void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device)
     inputLatencySamples = device->getInputLatencyInSamples();
     outputLatencySamples = device->getOutputLatencyInSamples();
 
+    // Build names for active input channels so UI can populate a selector.
+    activeInputChannelNames.clear();
+    const auto activeBits = device->getActiveInputChannels();
+    const auto allNames   = device->getInputChannelNames();
+    for (int i = 0; i < allNames.size(); ++i)
+        if (activeBits[i])
+            activeInputChannelNames.add(allNames[i].isEmpty()
+                                            ? "Input " + juce::String(i + 1)
+                                            : allNames[i]);
+
     midiCollector.reset(device->getCurrentSampleRate());
 
     pluginHost.prepare(device->getCurrentSampleRate(),
                        device->getCurrentBufferSizeSamples(),
                        device->getActiveInputChannels().countNumberOfSetBits(),
                        device->getActiveOutputChannels().countNumberOfSetBits());
+
+    if (onDeviceChanged)
+        onDeviceChanged();
 }
 
 void AudioEngine::audioDeviceStopped()
 {
     HostDebug::log("Audio device stopped");
+    activeInputChannelNames.clear();
+    if (onDeviceChanged)
+        onDeviceChanged();
 }
 
 void AudioEngine::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)

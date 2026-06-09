@@ -119,11 +119,13 @@ public:
     explicit SectionHeaderComponent(ChainListModel& ownerModel);
 
     void update(int rowIdx, const ChainRow& row, bool isRowSelected);
+    void setHorizontalMode(bool horizontal);
     void resized() override;
     void paint(juce::Graphics&) override;
     void mouseDown(const juce::MouseEvent&) override;
 
 private:
+    bool horizontalMode = false;
     void timerCallback() override;
 
     ChainListModel& model;
@@ -222,4 +224,114 @@ private:
     static int slotIndexFromDescription(const juce::var& description);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChainListBoxView)
+};
+
+// ── Level meter bar ────────────────────────────────────────────────────────────
+
+/** Horizontal dBFS level meter.
+    Assign getLevel, then let the component update itself at 24 fps.
+    Click to reset the peak-hold marker. */
+class LevelMeterBar : public juce::Component,
+                      public juce::SettableTooltipClient,
+                      private juce::Timer
+{
+public:
+    static constexpr float kMinDb = -60.0f;
+    static constexpr float kMaxDb =   6.0f;
+
+    /** Assign before the component is shown. Returns raw linear peak (0..2+). */
+    std::function<float()> getLevel;
+
+    LevelMeterBar();
+
+    void resetPeak();
+
+    static float toDB(float linear) noexcept;
+    static float toNorm(float dB)   noexcept;
+
+    void paint(juce::Graphics&) override;
+    void mouseDown(const juce::MouseEvent&) override;
+
+private:
+    float displayLevel    = 0.0f;
+    float peakHold        = 0.0f;
+    int   peakHoldCounter = 0;
+
+    void timerCallback() override;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LevelMeterBar)
+};
+
+// ── Horizontal view: one column per section ────────────────────────────────────
+
+/** A column that shows one section: header at top, plugin slot rows stacked below.
+    Acts as a DragAndDropTarget so slots can be dropped into it from other columns. */
+class SectionColumnComponent : public juce::Component,
+                               public juce::DragAndDropTarget
+{
+public:
+    explicit SectionColumnComponent(ChainListModel& ownerModel);
+
+    /** Update with a header row, slot rows, and positional flags.
+        flatRowOffset is the row index of headerRow in the flat ChainListModel row array. */
+    void setRows(int flatRowOffset,
+                 const ChainRow& headerRow,
+                 const juce::Array<ChainRow>& slotRows);
+
+    int getNumSlots() const noexcept { return slotIndices.size(); }
+
+    std::function<void(int fromSlot, int toSlot, int sectionIdOverride)> onMovePlugin;
+
+    static constexpr int kColumnWidth = 240;
+    static constexpr int kRowHeight   = 52;
+
+    void resized() override;
+    void paintOverChildren(juce::Graphics&) override;
+
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDragMove(const SourceDetails&) override;
+    void itemDragExit(const SourceDetails&) override;
+    void itemDropped(const SourceDetails&) override;
+
+private:
+    ChainListModel& model;
+
+    int            sectionId  = 0;
+    juce::Array<int> slotIndices;
+
+    std::unique_ptr<SectionHeaderComponent> headerComp;
+    juce::OwnedArray<ChainSlotComponent>    slotComps;
+
+    int  dropSlotRow = -1;
+    bool dropBefore  = true;
+
+    static int slotIndexFromDescription(const juce::var& description);
+    int resolveDropTarget(juce::Point<int> pos, bool& outBefore, int& outSectionIdOverride) const;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SectionColumnComponent)
+};
+
+/** Horizontal signal-chain view: sections as side-by-side columns, scrollable.
+    Call setRows() with the same ChainRow array used for ChainListBoxView. */
+class ChainHorizontalView : public juce::Component
+{
+public:
+    explicit ChainHorizontalView(ChainListModel& ownerModel);
+
+    void setRows(const juce::Array<ChainRow>& rows);
+
+    std::function<void(int fromSlot, int toSlot, int sectionIdOverride)> onMovePlugin;
+
+    void resized() override;
+
+private:
+    ChainListModel& model;
+
+    juce::Viewport viewport;
+    juce::Component contentArea;
+    juce::OwnedArray<SectionColumnComponent> columns;
+
+    void layoutColumns();
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChainHorizontalView)
 };

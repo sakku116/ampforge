@@ -152,6 +152,7 @@ struct ControlTrigger {
 | Per-section output volume control | `PluginChain::setSectionGain`, `SectionDef::gain`, `Slot::sectionOutputGain` atomic (applied at last slot of section) |
 | Section level metering | `Slot::peakLevel` atomic, `SectionHeaderComponent` timer 24fps, horizontal bar with peak-hold |
 | Volume control UI | `VolumeControl` — button (speaker icon + dB label); click opens `CallOutBox` with horizontal slider + reset button |
+| Horizontal chain view (toggle) | `ChainHorizontalView`, `SectionColumnComponent`; ↔/↕ toggle button; persisted as `chainViewMode` |
 
 ---
 
@@ -180,6 +181,7 @@ struct ControlTrigger {
 | `scenes` | Templates state (key kept as "scenes" for backward compat with old saves) |
 | `controlMap` | Control bindings + expression mappings |
 | `pluginScanPaths` | Semicolon-separated list of custom scan directories |
+| `chainViewMode` | `bool` — `true` = horizontal layout, `false` = vertical (default) |
 
 ---
 
@@ -232,6 +234,6 @@ v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` a
 
 ## Recently Completed Work (last 3 sessions)
 
-1. **Stable slotId:** `ControlAction::index` for bypass/preset actions now stores `slotId` not positional index. Bindings survive section reorder. `findSlotIndexById()` resolves at execution. Persisted in `SlotSpec` and `Preset.cpp`.
-2. **Per-slot & per-section volume:** `Slot::postGain` + `SectionDef::gain` atomics; section gain applied at last slot of each section via `isLastInSection` flag (computed in `publish()`/`publishWithCrossfade()`). Level metering via `Slot::peakLevel` polled by `SectionHeaderComponent` timer. Gains persist in `.tfpreset`.
-3. **VolumeControl UI:** Replaced rotary `VolumeKnob` with `VolumeControl` — a button showing speaker icon + dB label. Click opens `juce::CallOutBox` (tooltip-style bubble) with a horizontal slider (−30…+6 dB, midpoint = 0 dB) and a "↺ 0 dB" reset button. `juce::SettableTooltipClient` inherited for tooltip support.
+1. **Per-slot & per-section volume:** `Slot::postGain` + `SectionDef::gain` atomics; section gain applied at last slot of each section via `isLastInSection` flag (computed in `publish()`/`publishWithCrossfade()`). Level metering via `Slot::peakLevel` polled by `SectionHeaderComponent` timer. Gains persist in `.tfpreset`.
+2. **VolumeControl UI:** Replaced rotary `VolumeKnob` with `VolumeControl` — a button showing speaker icon + dB label. Click opens `juce::CallOutBox` (tooltip-style bubble) with a horizontal slider (−30…+6 dB, midpoint = 0 dB) and a "↺ 0 dB" reset button. `juce::SettableTooltipClient` inherited for tooltip support.
+3. **Horizontal chain view:** `ChainHorizontalView` + `SectionColumnComponent` added to `ChainListBox.h/.cpp`. Toggle button (↔/↕) in chain panel header switches vertical ↔ horizontal mode. Horizontal mode renders sections as side-by-side columns (200 px each, 8 px gap) inside a `juce::Viewport`. Section headers show ◀▶ instead of ▲▼. Slot DnD works cross-column via `DragAndDropTarget` on each column. Preference persisted as `chainViewMode` in `ApplicationProperties`.

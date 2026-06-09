@@ -179,6 +179,150 @@ void VolumeControl::showCallout()
         nullptr);
 }
 
+// ── LevelMeterBar ─────────────────────────────────────────────────────────────
+
+float LevelMeterBar::toDB(float linear) noexcept
+{
+    return linear < 1e-7f ? kMinDb : juce::Decibels::gainToDecibels(linear);
+}
+
+float LevelMeterBar::toNorm(float dB) noexcept
+{
+    return juce::jlimit(0.0f, 1.0f, (dB - kMinDb) / (kMaxDb - kMinDb));
+}
+
+LevelMeterBar::LevelMeterBar()
+{
+    setMouseCursor(juce::MouseCursor::PointingHandCursor);
+    setTooltip("Click to reset peak hold");
+    startTimerHz(24);
+}
+
+void LevelMeterBar::resetPeak()
+{
+    peakHold = 0.0f;
+    peakHoldCounter = 0;
+    repaint();
+}
+
+void LevelMeterBar::mouseDown(const juce::MouseEvent&)
+{
+    resetPeak();
+}
+
+void LevelMeterBar::timerCallback()
+{
+    if (! getLevel) return;
+    const float raw = getLevel();
+    displayLevel = raw > displayLevel ? raw : displayLevel * 0.88f;
+    if (raw >= peakHold)
+    {
+        peakHold = raw;
+        peakHoldCounter = 60;   // ~2.5 s at 24 fps
+    }
+    else if (peakHoldCounter > 0)
+        --peakHoldCounter;
+    else
+        peakHold *= 0.94f;
+    repaint();
+}
+
+void LevelMeterBar::paint(juce::Graphics& g)
+{
+    const auto bounds = getLocalBounds();
+    const int w = bounds.getWidth();
+    const int h = bounds.getHeight();
+
+    // Layout: top region for labels, bottom for the bar.
+    constexpr int kLabelH = 13;
+    const int barTop = bounds.getY() + kLabelH + 1;
+    const int barH   = h - kLabelH - 1;
+
+    if (barH < 3) return;
+
+    // dB → pixel X helper.
+    auto dBtoX = [&](float dB) -> int {
+        return bounds.getX() + juce::roundToInt(toNorm(dB) * (float)w);
+    };
+
+    // ── dB scale labels ──────────────────────────────────────────────────────
+    constexpr float ticksDb[]    = { -60.0f, -40.0f, -20.0f, -12.0f, -6.0f, 0.0f, 6.0f };
+    constexpr const char* labels[] = { "-60", "-40", "-20", "-12", "-6", "0", "+6" };
+
+    g.setFont(juce::FontOptions(9.0f));
+    for (int i = 0; i < 7; ++i)
+    {
+        const int x = dBtoX(ticksDb[i]);
+        g.setColour(tf::colour::textDim.withAlpha(0.65f));
+        g.drawText(juce::String(labels[i]),
+                   x - 12, bounds.getY(), 24, kLabelH,
+                   juce::Justification::centred, false);
+    }
+
+    // ── Bar background ────────────────────────────────────────────────────────
+    const juce::Rectangle<int> bar(bounds.getX(), barTop, w, barH);
+    g.setColour(tf::colour::background.withAlpha(0.9f));
+    g.fillRoundedRectangle(bar.toFloat(), 2.0f);
+
+    // ── Three-zone fill ───────────────────────────────────────────────────────
+    if (displayLevel > 1e-7f)
+    {
+        const int levelX    = dBtoX(toDB(displayLevel));
+        const int greenEnd  = dBtoX(-12.0f);
+        const int yellowEnd = dBtoX(-6.0f);
+
+        auto fillZone = [&](juce::Colour col, int x1, int x2)
+        {
+            x1 = juce::jlimit(bar.getX(), bar.getRight(), x1);
+            x2 = juce::jlimit(bar.getX(), bar.getRight(), x2);
+            if (x2 > x1)
+            {
+                g.setColour(col);
+                g.fillRect(x1, barTop, x2 - x1, barH);
+            }
+        };
+
+        fillZone(juce::Colour(0xff22c55e), bar.getX(),  juce::jmin(levelX, greenEnd));
+        fillZone(juce::Colour(0xfff59e0b), greenEnd,    juce::jmin(levelX, yellowEnd));
+        fillZone(juce::Colour(0xffef4444), yellowEnd,   levelX);
+    }
+
+    // ── Tick-mark hairlines on the bar ────────────────────────────────────────
+    for (int i = 0; i < 7; ++i)
+    {
+        const int x = dBtoX(ticksDb[i]);
+        g.setColour(juce::Colours::black.withAlpha(0.22f));
+        g.drawVerticalLine(x, (float) barTop, (float) (barTop + barH));
+    }
+
+    // ── Bar border ────────────────────────────────────────────────────────────
+    g.setColour(tf::colour::outline.withAlpha(0.4f));
+    g.drawRoundedRectangle(bar.toFloat().reduced(0.5f), 2.0f, 0.7f);
+
+    // ── Peak hold tick + dB label ─────────────────────────────────────────────
+    if (peakHold > 1e-7f)
+    {
+        const float peakDb = toDB(peakHold);
+        const int   peakX  = dBtoX(peakDb);
+        const bool  isClip = peakHold >= 1.0f;
+
+        g.setColour(isClip ? tf::colour::danger : juce::Colours::white.withAlpha(0.9f));
+        g.fillRect(peakX - 1, barTop, 2, barH);
+
+        // Peak dB label (right edge of the label row)
+        juce::String peakStr;
+        if (isClip)
+            peakStr = "CLIP";
+        else
+            peakStr = (peakDb >= 0.0f ? "+" : "") + juce::String(peakDb, 1) + " dB";
+
+        g.setFont(juce::FontOptions(9.5f, juce::Font::bold));
+        g.setColour(isClip ? tf::colour::danger : tf::colour::textDim);
+        g.drawText(peakStr, bounds.getRight() - 44, bounds.getY(), 42, kLabelH,
+                   juce::Justification::centredRight, false);
+    }
+}
+
 namespace
 {
     const juce::String kUp             = juce::String::fromUTF8("\xE2\x96\xB2");   // ▲
@@ -189,6 +333,8 @@ namespace
     const juce::String kPresetActive   = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶
     const juce::String kPresetInactive = juce::String::fromUTF8("\xE2\x97\x8B");   // ○
     const juce::String kEditor         = juce::String::fromUTF8("\xE2\x9A\x99");   // ⚙
+    const juce::String kLeft           = juce::String::fromUTF8("\xE2\x97\x80");   // ◀
+    const juce::String kRight          = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶ (same glyph, section-move context)
 }
 
 // ── Model: refreshComponentForRow ─────────────────────────────────────────────
@@ -329,37 +475,69 @@ void SectionHeaderComponent::paint(juce::Graphics& g)
     // Reserve space for volume control + 4 buttons on the right.
     nameArea.removeFromRight(30 + 3 + 26 * 4 + 3 + 2 + 6 + 6);
 
-    // Level meter strip at the bottom of the name area.
-    auto meterArea = nameArea.removeFromBottom(7).reduced(0, 1);
-    const float level = juce::jlimit(0.0f, 1.0f, displayLevel);
-    const float hold  = juce::jlimit(0.0f, 1.0f, peakHold);
+    // ── Level meter strip (dBFS scale) ────────────────────────────────────────
+    auto meterArea = nameArea.removeFromBottom(10).reduced(0, 1);
 
-    // Background track.
-    g.setColour(tf::colour::outline.withAlpha(0.4f));
+    // Bar background.
+    g.setColour(tf::colour::background.withAlpha(0.8f));
     g.fillRoundedRectangle(meterArea.toFloat(), 2.0f);
 
-    // Filled level bar — colour shifts green→yellow→red.
-    if (level > 0.0f)
+    // Three-zone fill (dBFS mapped to bar width).
+    if (displayLevel > 1e-7f)
     {
-        const int filledW = juce::roundToInt(level * meterArea.getWidth());
-        auto filled = meterArea.withWidth(filledW);
+        const float levelNorm   = LevelMeterBar::toNorm(LevelMeterBar::toDB(displayLevel));
+        const float greenThresh = LevelMeterBar::toNorm(-12.0f);
+        const float yellowThresh= LevelMeterBar::toNorm(-6.0f);
+        const int mW = meterArea.getWidth();
+        const int levelX    = meterArea.getX() + juce::roundToInt(levelNorm    * mW);
+        const int greenEndX = meterArea.getX() + juce::roundToInt(greenThresh  * mW);
+        const int yellowEndX= meterArea.getX() + juce::roundToInt(yellowThresh * mW);
 
-        const juce::Colour lo = juce::Colour(0xff22c55e);   // green
-        const juce::Colour hi = juce::Colour(0xffef4444);   // red
-        g.setColour(lo.interpolatedWith(hi, level));
-        g.fillRoundedRectangle(filled.toFloat(), 2.0f);
+        auto fillZone = [&](juce::Colour col, int x1, int x2)
+        {
+            x1 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x1);
+            x2 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x2);
+            if (x2 > x1) { g.setColour(col); g.fillRect(x1, meterArea.getY(), x2 - x1, meterArea.getHeight()); }
+        };
+        fillZone(juce::Colour(0xff22c55e), meterArea.getX(), juce::jmin(levelX, greenEndX));
+        fillZone(juce::Colour(0xfff59e0b), greenEndX,        juce::jmin(levelX, yellowEndX));
+        fillZone(juce::Colour(0xffef4444), yellowEndX,       levelX);
     }
 
     // Peak-hold tick.
-    if (hold > 0.0f)
+    if (peakHold > 1e-7f)
     {
-        const int holdX = meterArea.getX() + juce::roundToInt(hold * meterArea.getWidth());
-        g.setColour(juce::Colours::white.withAlpha(0.6f));
+        const float holdNorm = LevelMeterBar::toNorm(LevelMeterBar::toDB(peakHold));
+        const int holdX = meterArea.getX() + juce::roundToInt(holdNorm * meterArea.getWidth());
+        const bool isClip = peakHold >= 1.0f;
+        g.setColour(isClip ? tf::colour::danger : juce::Colours::white.withAlpha(0.75f));
         g.fillRect(holdX - 1, meterArea.getY(), 2, meterArea.getHeight());
     }
 
-    g.setColour(tf::colour::text);
+    // Bar border.
+    g.setColour(tf::colour::outline.withAlpha(0.35f));
+    g.drawRoundedRectangle(meterArea.toFloat().reduced(0.5f), 2.0f, 0.6f);
+
+    // ── Section name + peak dB label in remaining nameArea ────────────────────
     g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+
+    if (peakHold > 1e-7f)
+    {
+        const float peakDb = LevelMeterBar::toDB(peakHold);
+        const bool  isClip = peakHold >= 1.0f;
+        const juce::Colour pkCol = isClip ? tf::colour::danger
+                                 : (peakDb > -6.0f) ? tf::colour::warn
+                                 : tf::colour::textDim;
+        const juce::String pkStr = isClip ? "CLIP"
+                                 : (peakDb >= 0.0f ? "+" : "") + juce::String(peakDb, 1) + " dB";
+        auto peakLabel = nameArea.removeFromRight(50);
+        g.setColour(pkCol);
+        g.setFont(juce::FontOptions(10.0f));
+        g.drawText(pkStr, peakLabel, juce::Justification::centredRight);
+        g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+    }
+
+    g.setColour(tf::colour::text);
     g.drawText(sectionName, nameArea, juce::Justification::centredLeft);
 }
 
@@ -410,6 +588,13 @@ void SectionHeaderComponent::mouseDown(const juce::MouseEvent& e)
                     model.onSectionRemove(sectionId);
             });
     }
+}
+
+void SectionHeaderComponent::setHorizontalMode(bool horizontal)
+{
+    horizontalMode = horizontal;
+    upButton  .setButtonText(horizontal ? kLeft  : kUp);
+    downButton.setButtonText(horizontal ? kRight : kDown);
 }
 
 // ── ChainSlotComponent ────────────────────────────────────────────────────────
@@ -776,4 +961,274 @@ void ChainListBoxView::paintOverChildren(juce::Graphics& g)
     juce::Path arrow;
     arrow.addTriangle(4.0f, (float) (y - 4), 4.0f, (float) (y + 4), 10.0f, (float) y);
     g.fillPath(arrow);
+}
+
+// ── SectionColumnComponent ────────────────────────────────────────────────────
+
+SectionColumnComponent::SectionColumnComponent(ChainListModel& ownerModel)
+    : model(ownerModel)
+{}
+
+void SectionColumnComponent::setRows(int flatRowOffset,
+                                      const ChainRow& headerRow,
+                                      const juce::Array<ChainRow>& slotRows)
+{
+    sectionId = headerRow.sectionId;
+
+    slotIndices.clearQuick();
+    for (const auto& r : slotRows)
+        slotIndices.add(r.slotIndex);
+
+    if (headerComp == nullptr)
+    {
+        headerComp = std::make_unique<SectionHeaderComponent>(model);
+        headerComp->setHorizontalMode(true);
+        addAndMakeVisible(*headerComp);
+    }
+    headerComp->update(flatRowOffset, headerRow, false);
+
+    const int n = slotRows.size();
+    while (slotComps.size() > n)
+        slotComps.removeLast();
+    while (slotComps.size() < n)
+        addAndMakeVisible(slotComps.add(new ChainSlotComponent(model)));
+
+    for (int i = 0; i < n; ++i)
+        slotComps[i]->update(flatRowOffset + 1 + i, slotRows.getReference(i), false);
+
+    resized();
+}
+
+void SectionColumnComponent::resized()
+{
+    auto area = getLocalBounds();
+    if (headerComp != nullptr)
+        headerComp->setBounds(area.removeFromTop(kRowHeight));
+    for (auto* slot : slotComps)
+        slot->setBounds(area.removeFromTop(kRowHeight));
+}
+
+void SectionColumnComponent::paintOverChildren(juce::Graphics& g)
+{
+    if (dropSlotRow < 0)
+        return;
+
+    const int y = (dropSlotRow < slotComps.size())
+                ? kRowHeight + dropSlotRow * kRowHeight + (dropBefore ? 0 : kRowHeight)
+                : kRowHeight + slotComps.size() * kRowHeight;
+
+    g.setColour(tf::colour::accent);
+    g.fillRect(4, y - 1, kColumnWidth - 8, 2);
+
+    juce::Path arrow;
+    arrow.addTriangle(4.0f, (float) (y - 4), 4.0f, (float) (y + 4), 10.0f, (float) y);
+    g.fillPath(arrow);
+}
+
+int SectionColumnComponent::slotIndexFromDescription(const juce::var& description)
+{
+    const juce::String s = description.toString();
+    if (s.startsWith("chain-slot:"))
+        return s.fromFirstOccurrenceOf(":", false, false).getIntValue();
+    return -1;
+}
+
+int SectionColumnComponent::resolveDropTarget(juce::Point<int> pos, bool& outBefore,
+                                               int& outSectionIdOverride) const
+{
+    outSectionIdOverride = -1;
+    outBefore = true;
+
+    // Dropping on the header area, or anywhere in an empty column
+    if (pos.y < kRowHeight || slotIndices.isEmpty())
+    {
+        outSectionIdOverride = sectionId;
+
+        if (! slotIndices.isEmpty())
+            return slotIndices.getLast() + 1;   // insertion point = end of this section
+
+        // Empty section: find the first slot that belongs to a later section
+        const auto& rows = model.getRows();
+        bool pastSection = false;
+        for (const auto& r : rows)
+        {
+            if (r.kind == ChainRow::Kind::sectionHeader)
+            {
+                if (r.sectionId == sectionId) pastSection = true;
+                continue;
+            }
+            if (pastSection && r.kind == ChainRow::Kind::slot)
+                return r.slotIndex;
+        }
+        return model.getSlotCount();
+    }
+
+    const int slotRow = juce::jlimit(0, slotIndices.size() - 1,
+                                      (pos.y - kRowHeight) / kRowHeight);
+    const int midY = kRowHeight + slotRow * kRowHeight + kRowHeight / 2;
+    outBefore = (pos.y < midY);
+    return slotIndices[slotRow];
+}
+
+bool SectionColumnComponent::isInterestedInDragSource(const SourceDetails& details)
+{
+    return details.description.toString().startsWith("chain-slot:");
+}
+
+void SectionColumnComponent::itemDragMove(const SourceDetails& details)
+{
+    bool before;
+    int sectionOverride;
+    resolveDropTarget(details.localPosition, before, sectionOverride);
+
+    int newRow;
+    bool newBefore;
+
+    if (sectionOverride >= 0)
+    {
+        newRow    = slotComps.size();   // draw indicator at end of column
+        newBefore = false;
+    }
+    else
+    {
+        newRow    = juce::jlimit(0, slotIndices.size() - 1,
+                                 (details.localPosition.y - kRowHeight) / kRowHeight);
+        newBefore = before;
+    }
+
+    if (newRow != dropSlotRow || newBefore != dropBefore)
+    {
+        dropSlotRow = newRow;
+        dropBefore  = newBefore;
+        repaint();
+    }
+}
+
+void SectionColumnComponent::itemDragExit(const SourceDetails&)
+{
+    dropSlotRow = -1;
+    repaint();
+}
+
+void SectionColumnComponent::itemDropped(const SourceDetails& details)
+{
+    dropSlotRow = -1;
+    repaint();
+
+    const int fromSlot = slotIndexFromDescription(details.description);
+    if (fromSlot < 0) return;
+
+    bool before;
+    int sectionIdOverride;
+    const int toSlot = resolveDropTarget(details.localPosition, before, sectionIdOverride);
+    if (toSlot < 0) return;
+
+    int finalTarget;
+    if (sectionIdOverride >= 0)
+    {
+        if      (fromSlot < toSlot) finalTarget = toSlot - 1;
+        else if (fromSlot == toSlot) finalTarget = fromSlot;
+        else                         finalTarget = toSlot;
+    }
+    else
+    {
+        if (before)
+            finalTarget = (fromSlot > toSlot) ? toSlot : toSlot - 1;
+        else
+            finalTarget = (fromSlot < toSlot) ? toSlot : toSlot + 1;
+    }
+
+    if (finalTarget < 0 || (finalTarget == fromSlot && sectionIdOverride < 0))
+        return;
+
+    if (onMovePlugin)
+        onMovePlugin(fromSlot, finalTarget, sectionIdOverride);
+}
+
+// ── ChainHorizontalView ───────────────────────────────────────────────────────
+
+ChainHorizontalView::ChainHorizontalView(ChainListModel& ownerModel)
+    : model(ownerModel)
+{
+    viewport.setScrollBarsShown(false, false);   // mouse-wheel scrolling, no visible bars
+    viewport.setViewedComponent(&contentArea, false);
+    addAndMakeVisible(viewport);
+}
+
+void ChainHorizontalView::resized()
+{
+    viewport.setBounds(getLocalBounds());
+    layoutColumns();
+}
+
+void ChainHorizontalView::setRows(const juce::Array<ChainRow>& rows)
+{
+    // Partition flat rows into per-section groups
+    struct SectionData
+    {
+        ChainRow header;
+        juce::Array<ChainRow> slots;
+        int flatHeaderIdx = 0;
+    };
+
+    juce::Array<SectionData> sections;
+    for (int i = 0; i < rows.size(); ++i)
+    {
+        const auto& r = rows.getReference(i);
+        if (r.kind == ChainRow::Kind::sectionHeader)
+        {
+            SectionData sec;
+            sec.header        = r;
+            sec.flatHeaderIdx = i;
+            sections.add(std::move(sec));
+        }
+        else if (! sections.isEmpty())
+        {
+            sections.getReference(sections.size() - 1).slots.add(r);
+        }
+    }
+
+    const int n = sections.size();
+
+    if (columns.size() != n)
+    {
+        columns.clear();
+        for (int i = 0; i < n; ++i)
+        {
+            auto* col = columns.add(new SectionColumnComponent(model));
+            col->onMovePlugin = [this](int f, int t, int s)
+            {
+                if (onMovePlugin) onMovePlugin(f, t, s);
+            };
+            contentArea.addAndMakeVisible(*col);
+        }
+    }
+
+    for (int i = 0; i < n; ++i)
+    {
+        const auto& sec = sections.getReference(i);
+        columns[i]->setRows(sec.flatHeaderIdx, sec.header, sec.slots);
+    }
+
+    layoutColumns();
+}
+
+void ChainHorizontalView::layoutColumns()
+{
+    constexpr int colW = SectionColumnComponent::kColumnWidth;
+    constexpr int gap  = 8;
+
+    const int n = columns.size();
+    const int contentW = n > 0 ? n * colW + (n - 1) * gap : 0;
+
+    // Content height: at least the viewport height; expand if any column needs more
+    int contentH = getHeight();
+    for (auto* col : columns)
+        contentH = juce::jmax(contentH,
+                              SectionColumnComponent::kRowHeight * (1 + col->getNumSlots()));
+
+    contentArea.setSize(juce::jmax(contentW, getWidth()), juce::jmax(contentH, 1));
+
+    for (int i = 0; i < n; ++i)
+        columns[i]->setBounds(i * (colW + gap), 0, colW, contentH);
 }

@@ -107,6 +107,7 @@ endif()
 
 if(NOT ENABLE_ASIO)
     foreach(_candidate
+            "${CMAKE_SOURCE_DIR}/ASIOSDK"
             "${CMAKE_SOURCE_DIR}/asiosdk"
             "${CMAKE_SOURCE_DIR}/asio"
             "${CMAKE_SOURCE_DIR}/ASIO_SDK"

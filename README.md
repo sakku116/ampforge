@@ -1,6 +1,6 @@
 # Guitar MultiFX Simulator
 
-A real-time guitar multi-effects processor for Windows, built with JUCE and C++20. Hosts VST3 (and optionally VST2) plugins in a flexible, pedalboard-style signal chain.
+A real-time guitar multi-effects processor for Windows, built with JUCE and C++20. Hosts VST3 and VST2 plugins in a flexible, pedalboard-style signal chain.
 
 Designed to replace a physical pedalboard on a desktop — arrange effects in any order, toggle bypass per pedal, save presets, and bind MIDI footswitches or keyboard keys to actions for live use.
 
@@ -37,21 +37,23 @@ Quick start:
 ### Requirements
 
 - **Windows 10 or 11**
-- **Visual Studio 2022** with the *Desktop development with C++* workload
+- **Visual Studio 2022 or 2026** with the *Desktop development with C++* workload
 - **CMake 3.22+**
 - Internet connection on first configure (JUCE is downloaded automatically via CMake)
 
 ### Build
+
+Both ASIO and VST2 support are **bundled in this repository** — no additional downloads required.
 
 ```powershell
 # Clone the repo
 git clone https://github.com/YOUR_USERNAME/guitar-multifx-simulator
 cd guitar-multifx-simulator
 
-# Configure (Visual Studio 2022)
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-# or for Visual Studio 2026:
-# cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+# Configure
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+# or for Visual Studio 2022:
+# cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
 # Build
 cmake --build build --config Debug --parallel
@@ -65,99 +67,15 @@ make release    # Release build
 make run        # Build and run (Debug)
 ```
 
+A successful configure will print:
+```
+-- ASIO enabled. SDK: .../ASIOSDK
+-- VST2 enabled. SDK: .../vst2sdk
+```
+
 The executable is at `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe`.
 
 > **Note:** Two files must exist in the same folder — `Guitar VST3 Host.exe` and `GuitarVST3ScanWorker.exe`. CMake copies the worker automatically after every build.
-
----
-
-## ASIO Setup (Optional, Recommended)
-
-ASIO provides significantly lower latency than WASAPI/DirectSound — strongly recommended if you use an audio interface (Focusrite, Behringer, etc.).
-
-### 1. Download the Steinberg ASIO SDK
-
-Get it from the official Steinberg page (free, requires account registration):
-
-👉 https://www.steinberg.net/asiosdk/
-
-Or clone directly:
-
-```powershell
-git clone https://github.com/audiosdk/asio.git asio
-```
-
-### 2. Place the SDK in one of these locations
-
-CMake detects it automatically from several locations:
-
-| Location | Notes |
-|----------|-------|
-| `asio/` in the project root | Easiest — local to this project |
-| `C:\ASIOSDK` | Global — shared across projects |
-
-Expected folder structure:
-```
-asio/
-  common/
-    asio.h
-    asiodrivers.h
-    ...
-```
-
-### 3. Reconfigure and rebuild
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Debug --parallel
-```
-
-If the SDK is detected, CMake will print:
-```
--- ASIO SDK found: <path>
-```
-
-After building, open **Audio Settings** in the app and select your audio interface's ASIO driver.
-
-> The `asio/` folder is not committed to this repo (listed in `.gitignore`).
-
----
-
-## VST2 Setup (Optional)
-
-If you have VST2 plugins (older format), support can be enabled by providing the Steinberg VST2 SDK.
-
-> **License notice:** Steinberg discontinued VST2 in October 2018. Distributing a VST2 host requires a license agreement signed with Steinberg before that date. This project does **not** include the VST2 SDK — you must provide your own and ensure you comply with Steinberg's terms. The `vst2sdk/` folder is excluded from this repo (`.gitignore`).
->
-> You can obtain the headers from an archived VST3 SDK release (≤ 3.6.10, June 2018) which included `aeffect.h` and `aeffectx.h`.
-
-### Place the SDK in one of these locations
-
-| Location | Notes |
-|----------|-------|
-| `vst2sdk/` in the project root | Local to this project |
-| `C:\VST2_SDK` | Global |
-
-Expected structure:
-```
-vst2sdk/
-  pluginterfaces/
-    vst2.x/
-      aeffect.h
-      aeffectx.h
-```
-
-### Reconfigure and rebuild
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64  # or "Visual Studio 18 2026"
-cmake --build build --config Debug --parallel
-```
-
-If the SDK is detected:
-```
--- VST2 SDK found: <path>
-```
 
 ---
 
@@ -167,7 +85,7 @@ If the SDK is detected:
 |---------|----------|
 | Plugins not showing up | Click **Rescan Plugins**; add custom folders via **Scan Paths...** |
 | No audio output | Check Audio Settings — make sure the correct input/output device is selected |
-| High latency | Enable ASIO (see setup above) and reduce buffer size |
+| High latency | Enable ASIO and reduce buffer size in Audio Settings |
 | "Couldn't open input device" | Connect your audio interface, or open Audio Settings |
 | Plugin crashes during scan | Expected — the scan worker isolates crashes; check the log for details |
 
@@ -178,14 +96,13 @@ If the SDK is detected:
 ## Project Structure
 
 ```
-src/              All C++ source code
-docs/             Additional documentation (USER_GUIDE.md)
-build/            Build output (generated by CMake, not committed)
-asio/             Steinberg ASIO SDK (optional, not committed)
-vst2sdk/          Steinberg VST2 SDK (optional, not committed)
+src/              C++ source code
+docs/             User guide
+ASIOSDK/          Steinberg ASIO SDK 2.3 (bundled, GPL v3)
+vst2sdk/          VST2 interface headers (bundled, MIT clean-room)
+build/            Build output (generated, not committed)
 CMakeLists.txt    Build configuration
-Makefile          Build command shortcuts
-CLAUDE.md         Project context for AI assistants
+Makefile          Build shortcuts
 ```
 
 ---
@@ -194,8 +111,16 @@ CLAUDE.md         Project context for AI assistants
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPLv3)** — see [LICENSE](LICENSE) for the full text.
 
-JUCE is used under its AGPLv3 option. See [juce.com](https://juce.com/get-juce/) for JUCE licensing details.
+| Component | License | Notes |
+|-----------|---------|-------|
+| This project | AGPLv3 — [LICENSE](LICENSE) | |
+| JUCE | AGPLv3 option | See [juce.com/get-juce](https://juce.com/get-juce/) |
+| Steinberg ASIO SDK 2.3 (`ASIOSDK/`) | GPL v3 option | See [ASIOSDK/LICENSE.txt](ASIOSDK/LICENSE.txt) |
+| VST2 interface headers (`vst2sdk/`) | MIT | Clean-room implementation — see [vst2sdk/LICENSE](vst2sdk/LICENSE) |
+| Steinberg VST3 SDK | MIT | Bundled within JUCE via CMake FetchContent |
 
-VST3 SDK is used under the MIT License (Steinberg, since VST3 SDK 3.8, October 2025).
+### VST2 hosting note
 
-VST2 support (optional, off by default) requires the user to supply the Steinberg VST2 SDK and comply with its separate license terms.
+The `vst2sdk/` headers are a clean-room implementation of the VST2 binary ABI — not derived from Steinberg's source code. Hosting VST2 plugins for interoperability purposes is permitted under reverse-engineering-for-interoperability provisions in most jurisdictions (US DMCA § 1201(f), EU Software Directive Article 6(2)).
+
+"VST" is a trademark of Steinberg Media Technologies GmbH. This project is not affiliated with or endorsed by Steinberg.

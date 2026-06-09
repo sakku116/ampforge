@@ -84,9 +84,14 @@ cmake-build-*/
 
 # IDE — Visual Studio
 .vs/
+*.vcxproj
 *.vcxproj.user
+*.vcxproj.filters
+*.sln
+*.slnx
 *.VC.db
 *.VC.opendb
+*_artefacts/
 
 # IDE — VS Code
 .vscode/
@@ -126,6 +131,7 @@ $RECYCLE.BIN/
 .github/
 agent/
 
-# Local optional dependencies
-asio/
-vst2sdk/
+# Optional dependencies
+# ASIOSDK/ is tracked (GPL v3 — see ASIOSDK/LICENSE.txt)
+# vst2sdk/ is tracked (MIT clean-room — see vst2sdk/LICENSE)
+VST_SDK/    # VST3 SDK full download — not needed, JUCE bundles VST3

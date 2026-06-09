@@ -45,11 +45,13 @@ Quick start:
 
 ```powershell
 # Clone the repo
-git clone <repo-url>
+git clone https://github.com/YOUR_USERNAME/guitar-multifx-simulator
 cd guitar-multifx-simulator
 
-# Configure
+# Configure (Visual Studio 2022)
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+# or for Visual Studio 2026:
+# cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 
 # Build
 cmake --build build --config Debug --parallel
@@ -125,7 +127,9 @@ After building, open **Audio Settings** in the app and select your audio interfa
 
 If you have VST2 plugins (older format), support can be enabled by providing the Steinberg VST2 SDK.
 
-> Steinberg has discontinued official VST2 SDK distribution. You can obtain it from the VST3 SDK which includes a compatibility wrapper under `public.sdk/source/vst2.x/`.
+> **License notice:** Steinberg discontinued VST2 in October 2018. Distributing a VST2 host requires a license agreement signed with Steinberg before that date. This project does **not** include the VST2 SDK — you must provide your own and ensure you comply with Steinberg's terms. The `vst2sdk/` folder is excluded from this repo (`.gitignore`).
+>
+> You can obtain the headers from an archived VST3 SDK release (≤ 3.6.10, June 2018) which included `aeffect.h` and `aeffectx.h`.
 
 ### Place the SDK in one of these locations
 
@@ -146,7 +150,7 @@ vst2sdk/
 ### Reconfigure and rebuild
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64  # or "Visual Studio 18 2026"
 cmake --build build --config Debug --parallel
 ```
 
@@ -188,4 +192,10 @@ CLAUDE.md         Project context for AI assistants
 
 ## License
 
-For personal use. JUCE is used under its own license — see [juce.com](https://juce.com/juce-privacy-policy).
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPLv3)** — see [LICENSE](LICENSE) for the full text.
+
+JUCE is used under its AGPLv3 option. See [juce.com](https://juce.com/get-juce/) for JUCE licensing details.
+
+VST3 SDK is used under the MIT License (Steinberg, since VST3 SDK 3.8, October 2025).
+
+VST2 support (optional, off by default) requires the user to supply the Steinberg VST2 SDK and comply with its separate license terms.

@@ -128,3 +128,4 @@ agent/
 
 # Local optional dependencies
 asio/
+vst2sdk/

@@ -9,13 +9,13 @@ std::unique_ptr<juce::FileLogger> fileLogger;
 void setupLogging()
 {
     auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                      .getChildFile("GtrFxSim");
+                      .getChildFile("AmpForge");
 
     logDir.createDirectory();
     const auto logFile = logDir.getChildFile("host.log");
 
     fileLogger = std::make_unique<juce::FileLogger>(logFile,
-                                                    "=== Guitar VST3 Host session ===",
+                                                    "=== Amp Forge session ===",
                                                     512 * 1024);
 
     juce::Logger::setCurrentLogger(fileLogger.get());
@@ -46,10 +46,10 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
 };
 
-class GtrFxSimApplication : public juce::JUCEApplication
+class AmpForgeApplication : public juce::JUCEApplication
 {
 public:
-    const juce::String getApplicationName() override { return "Guitar VST3 Host"; }
+    const juce::String getApplicationName() override { return "Amp Forge"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
 
     void initialise(const juce::String&) override
@@ -72,4 +72,4 @@ private:
     std::unique_ptr<MainWindow> mainWindow;
 };
 
-START_JUCE_APPLICATION(GtrFxSimApplication)
+START_JUCE_APPLICATION(AmpForgeApplication)

@@ -1,4 +1,4 @@
-# Guitar MultiFX Simulator — AI Session Context
+# Amp Forge — AI Session Context
 
 Quick-load context for Claude Code sessions. Read this before touching any file.
 
@@ -14,13 +14,13 @@ cmake -S . -B build -G "Visual Studio 18 2026" -A x64
 cmake --build build --config Debug --parallel
 # or: make build / make release
 ```
-Output: `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe` + `GuitarVST3ScanWorker.exe` (auto-copied alongside host).
+Output: `build/AmpForge_artefacts/Debug/Amp Forge.exe` + `AmpForgeScanWorker.exe` (auto-copied alongside host).
 
 **Optional SDK auto-detection:**
 - ASIO: place SDK at `asio/` in project root → `JUCE_ASIO=1`
 - VST2: place SDK at `vst2sdk/` in project root → `JUCE_PLUGINHOST_VST=1`
 
-**Config/data location:** `%APPDATA%\GtrFxSim\` — log (`host.log`), presets (`presets/*.tfpreset`), app settings (audio device, templates, control map, scan paths).
+**Config/data location:** `%APPDATA%\AmpForge\` — log (`host.log`), presets (`presets/*.tfpreset`), app settings (audio device, templates, control map, scan paths).
 
 ---
 
@@ -30,8 +30,8 @@ Output: `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe` + `GuitarVST3ScanW
 
 | Target | File | Role |
 |--------|------|------|
-| `GtrFxSim` | `src/main.cpp` | GUI host — all UI + audio |
-| `GuitarVST3ScanWorker` | `src/scan_worker_main.cpp` | Console subprocess — loads one plugin DLL, prints XML to stdout, exits. Host parses and merges. Prevents crashed plugin from killing host. |
+| `AmpForge` | `src/main.cpp` | GUI host — all UI + audio |
+| `AmpForgeScanWorker` | `src/scan_worker_main.cpp` | Console subprocess — loads one plugin DLL, prints XML to stdout, exits. Host parses and merges. Prevents crashed plugin from killing host. |
 
 ### Source Files
 
@@ -49,7 +49,7 @@ Output: `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe` + `GuitarVST3ScanW
 | `ControlMap.h/.cpp` | Stores trigger→action bindings and expression mappings. Pure data; owner executes. |
 | `ChainListBox.h/.cpp` | `ListBoxModel` for signal chain. Rows = `SectionHeaderComponent` (32px) or `ChainSlotComponent` (52px). All slot/section callbacks wired through `ChainListModel`. |
 | `ToneForgeLookAndFeel.h/.cpp` | Dark "stage" theme. `tf::colour::` namespace: `background`, `surface`, `accent` (teal), `danger`, `warning`, `text`. |
-| `HostDebug.h` | `HostDebug::log()` — wraps `juce::Logger` with `[GuitarHost]` prefix. |
+| `HostDebug.h` | `HostDebug::log()` — wraps `juce::Logger` with `[AmpForge]` prefix. |
 
 ---
 

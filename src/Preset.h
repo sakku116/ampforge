@@ -36,7 +36,7 @@ namespace Preset
                       juce::Array<PluginChain::SlotSpec>& outSpecs,
                       juce::Array<PluginChain::SectionDef>& outSections);
 
-    /** %APPDATA%/GtrFxSim/presets (created on demand). */
+    /** %APPDATA%/AmpForge/presets (created on demand). */
     juce::File getPresetsDirectory();
 
     constexpr const char* fileExtension = ".tfpreset";

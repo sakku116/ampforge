@@ -1,19 +1,19 @@
 # Writes ${CMAKE_BINARY_DIR}/compile_commands.json for clangd (MSVC has no export).
 
-function(_guitar_escape_json_path out path)
+function(_ampforge_escape_json_path out path)
     file(TO_CMAKE_PATH "${path}" _path)
     string(REPLACE "\\" "/" _path "${_path}")
     set(${out} "${_path}" PARENT_SCOPE)
 endfunction()
 
-function(guitar_host_export_clangd_compile_db target)
+function(ampforge_export_clangd_compile_db target)
     get_target_property(_sources ${target} SOURCES)
     if(NOT _sources)
         return()
     endif()
 
     set(_juce_modules "${CMAKE_BINARY_DIR}/_deps/juce-src/modules")
-    set(_juce_generated "${CMAKE_BINARY_DIR}/GuitarVST3Host_artefacts/JuceLibraryCode")
+    set(_juce_generated "${CMAKE_BINARY_DIR}/AmpForge_artefacts/JuceLibraryCode")
     set(_vst3_sdk "${_juce_modules}/juce_audio_processors/format_types/VST3_SDK")
 
     set(_include_flags
@@ -43,8 +43,8 @@ function(guitar_host_export_clangd_compile_db target)
     set(_base_flags -std=c++20 ${_include_flags} ${_define_flags})
     list(JOIN _base_flags " " _base_flags_str)
 
-    _guitar_escape_json_path(_source_dir_json "${CMAKE_SOURCE_DIR}")
-    _guitar_escape_json_path(_binary_dir_json "${CMAKE_BINARY_DIR}")
+    _ampforge_escape_json_path(_source_dir_json "${CMAKE_SOURCE_DIR}")
+    _ampforge_escape_json_path(_binary_dir_json "${CMAKE_BINARY_DIR}")
 
     set(_json "[\n")
     set(_first TRUE)
@@ -60,7 +60,7 @@ function(guitar_host_export_clangd_compile_db target)
             set(_src_abs "${CMAKE_SOURCE_DIR}/${_src}")
         endif()
 
-        _guitar_escape_json_path(_src_json "${_src_abs}")
+        _ampforge_escape_json_path(_src_json "${_src_abs}")
         get_filename_component(_src_name "${_src}" NAME_WE)
         set(_obj_json "${_binary_dir_json}/clangd/${_src_name}.o")
 

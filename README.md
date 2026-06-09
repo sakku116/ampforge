@@ -1,4 +1,4 @@
-# Guitar MultiFX Simulator
+# Amp Forge
 
 A real-time guitar multi-effects processor for Windows, built with JUCE and C++20. Hosts VST3 and VST2 plugins in a flexible, pedalboard-style signal chain.
 
@@ -25,7 +25,7 @@ See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the full guide.
 
 Quick start:
 1. Build the project (see [Setup](#setup) below)
-2. Run `Guitar VST3 Host.exe`
+2. Run `Amp Forge.exe`
 3. VST3 plugins are detected automatically on startup
 4. Drag plugins from the Library into the Signal Chain
 5. Play guitar through your audio interface
@@ -73,9 +73,9 @@ A successful configure will print:
 -- VST2 enabled. SDK: .../vst2sdk
 ```
 
-The executable is at `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe`.
+The executable is at `build/AmpForge_artefacts/Debug/Amp Forge.exe`.
 
-> **Note:** Two files must exist in the same folder — `Guitar VST3 Host.exe` and `GuitarVST3ScanWorker.exe`. CMake copies the worker automatically after every build.
+> **Note:** Two files must exist in the same folder — `Amp Forge.exe` and `AmpForgeScanWorker.exe`. CMake copies the worker automatically after every build.
 
 ---
 
@@ -89,7 +89,7 @@ The executable is at `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe`.
 | "Couldn't open input device" | Connect your audio interface, or open Audio Settings |
 | Plugin crashes during scan | Expected — the scan worker isolates crashes; check the log for details |
 
-**Log file:** `%APPDATA%\GtrFxSim\host.log`
+**Log file:** `%APPDATA%\AmpForge\host.log`
 
 ---
 

@@ -1,4 +1,4 @@
-# Guitar VST3 Host — Makefile
+# Amp Forge — Makefile
 # Build & run targets (tested with Git Bash on Windows)
 
 .PHONY: help build release run run-release clean rebuild scan-worker logs check-sdks
@@ -7,12 +7,12 @@ BUILD_DIR := build
 CONFIG ?= Debug
 CMAKE   ?= $(shell if command -v cmake >/dev/null 2>&1; then command -v cmake; elif [ -x "/c/Program Files/CMake/bin/cmake.exe" ]; then printf '%s\n' "/c/Program Files/CMake/bin/cmake.exe"; else printf '%s\n' cmake; fi)
 VS_GEN  ?= Visual Studio 18 2026
-EXE_PATH := $(BUILD_DIR)/GtrFxSim_artefacts/$(CONFIG)/Guitar VST3 Host.exe
-WORKER_EXE := $(BUILD_DIR)/GtrFxSim_artefacts/$(CONFIG)/GuitarVST3ScanWorker.exe
-LOG_FILE := ~/AppData/Roaming/GtrFxSim/host.log
+EXE_PATH := $(BUILD_DIR)/AmpForge_artefacts/$(CONFIG)/Amp Forge.exe
+WORKER_EXE := $(BUILD_DIR)/AmpForge_artefacts/$(CONFIG)/AmpForgeScanWorker.exe
+LOG_FILE := ~/AppData/Roaming/AmpForge/host.log
 
 help:
-	@echo "Guitar VST3 Host — Makefile targets:"
+	@echo "Amp Forge — Makefile targets:"
 	@echo ""
 	@echo "  make build          — Build Debug (default)"
 	@echo "  make release        — Build Release"
@@ -42,12 +42,12 @@ rebuild: clean build
 	@echo "[+] Rebuild complete"
 
 run: build scan-worker
-	@echo "[*] Running Guitar VST3 Host ($(CONFIG))..."
+	@echo "[*] Running Amp Forge ($(CONFIG))..."
 	@"$(EXE_PATH)"
 
 run-release: release scan-worker
-	@echo "[*] Running Guitar VST3 Host (Release)..."
-	@"$(BUILD_DIR)/GtrFxSim_artefacts/Release/Guitar VST3 Host.exe"
+	@echo "[*] Running Amp Forge (Release)..."
+	@"$(BUILD_DIR)/AmpForge_artefacts/Release/Amp Forge.exe"
 
 clean:
 	@echo "[*] Removing build folder..."

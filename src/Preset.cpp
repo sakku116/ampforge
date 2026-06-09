@@ -190,7 +190,7 @@ bool loadFromFile(const juce::File& file,
 juce::File getPresetsDirectory()
 {
     auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                   .getChildFile("GtrFxSim")
+                   .getChildFile("AmpForge")
                    .getChildFile("presets");
     dir.createDirectory();
     return dir;

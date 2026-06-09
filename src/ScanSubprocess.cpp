@@ -42,7 +42,7 @@ juce::File getScanWorkerExecutable()
 {
    #if JUCE_WINDOWS
     const auto hostExe = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
-    const auto workerExe = hostExe.getSiblingFile("GuitarVST3ScanWorker.exe");
+    const auto workerExe = hostExe.getSiblingFile("AmpForgeScanWorker.exe");
 
     if (workerExe.existsAsFile())
         return workerExe;

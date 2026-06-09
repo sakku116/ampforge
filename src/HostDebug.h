@@ -7,7 +7,7 @@ namespace HostDebug
 {
 inline void log(const juce::String& message)
 {
-    juce::Logger::writeToLog("[GuitarHost] " + message);
+    juce::Logger::writeToLog("[AmpForge] " + message);
 }
 
 inline void log(const char* message)

@@ -15,7 +15,7 @@ MainComponent::MainComponent()
     setSize(1000, 660);
     setWantsKeyboardFocus(true);   // receive key presses for keyboard/footswitch mapping
 
-    titleLabel.setText("ToneForge", juce::dontSendNotification);
+    titleLabel.setText("Amp Forge", juce::dontSendNotification);
     titleLabel.setFont(juce::FontOptions(24.0f, juce::Font::bold));
     titleLabel.setColour(juce::Label::textColourId, tf::colour::text);
     addAndMakeVisible(titleLabel);
@@ -1537,9 +1537,9 @@ void MainComponent::tryRestoreLastPreset()
 void MainComponent::initialiseSettings()
 {
     juce::PropertiesFile::Options options;
-    options.applicationName = "GtrFxSim";
+    options.applicationName = "AmpForge";
     options.filenameSuffix = "settings";
-    options.folderName = "GtrFxSim";
+    options.folderName = "AmpForge";
     options.storageFormat = juce::PropertiesFile::storeAsXML;
 
     appProperties.setStorageParameters(options);

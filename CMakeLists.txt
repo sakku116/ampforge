@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(GtrFxSim VERSION 0.1.0 LANGUAGES CXX)
+project(AmpForge VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,17 +16,17 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_gui_app(GtrFxSim
-    PRODUCT_NAME "Guitar VST3 Host"
+juce_add_gui_app(AmpForge
+    PRODUCT_NAME "Amp Forge"
 )
 
-juce_add_console_app(GuitarVST3ScanWorker
-    PRODUCT_NAME "Guitar VST3 Scan Worker"
+juce_add_console_app(AmpForgeScanWorker
+    PRODUCT_NAME "AmpForgeScanWorker"
 )
 
-juce_generate_juce_header(GtrFxSim)
+juce_generate_juce_header(AmpForge)
 
-target_sources(GtrFxSim
+target_sources(AmpForge
     PRIVATE
         src/main.cpp
         src/AudioEngine.h
@@ -56,23 +56,23 @@ target_sources(GtrFxSim
         src/ScanSubprocess.cpp
 )
 
-juce_generate_juce_header(GuitarVST3ScanWorker)
+juce_generate_juce_header(AmpForgeScanWorker)
 
-target_sources(GuitarVST3ScanWorker
+target_sources(AmpForgeScanWorker
     PRIVATE
         src/scan_worker_main.cpp
         src/ScanSubprocess.h
         src/ScanSubprocess.cpp
 )
 
-target_compile_definitions(GuitarVST3ScanWorker
+target_compile_definitions(AmpForgeScanWorker
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST3=1
 )
 
-target_link_libraries(GuitarVST3ScanWorker
+target_link_libraries(AmpForgeScanWorker
     PRIVATE
         juce::juce_audio_processors
     PUBLIC
@@ -80,17 +80,17 @@ target_link_libraries(GuitarVST3ScanWorker
         juce::juce_recommended_warning_flags
 )
 
-add_dependencies(GtrFxSim GuitarVST3ScanWorker)
+add_dependencies(AmpForge AmpForgeScanWorker)
 
-add_custom_command(TARGET GuitarVST3ScanWorker POST_BUILD
+add_custom_command(TARGET AmpForgeScanWorker POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:GuitarVST3ScanWorker>"
-        "$<TARGET_FILE_DIR:GtrFxSim>/GuitarVST3ScanWorker.exe"
+        "$<TARGET_FILE:AmpForgeScanWorker>"
+        "$<TARGET_FILE_DIR:AmpForge>/AmpForgeScanWorker.exe"
     COMMENT "Copy scan worker next to host executable"
 )
 
 if(MSVC)
-    target_compile_options(GtrFxSim PRIVATE /EHa)
+    target_compile_options(AmpForge PRIVATE /EHa)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ set(_juce_asio_flag 0)
 if(ENABLE_ASIO)
     message(STATUS "ASIO enabled. SDK: ${ASIO_SDK_DIR}")
     set(_juce_asio_flag 1)
-    target_include_directories(GtrFxSim PRIVATE "${ASIO_SDK_DIR}/common")
+    target_include_directories(AmpForge PRIVATE "${ASIO_SDK_DIR}/common")
 else()
     message(STATUS "ASIO not found — building with WASAPI/DirectSound only. "
                    "Set -DASIO_SDK_DIR=<path> to enable ASIO.")
@@ -162,15 +162,15 @@ set(_juce_vst2_flag 0)
 if(ENABLE_VST2)
     message(STATUS "VST2 enabled. SDK: ${VST2_SDK_DIR}")
     set(_juce_vst2_flag 1)
-    target_include_directories(GtrFxSim             PRIVATE "${VST2_SDK_DIR}")
-    target_include_directories(GuitarVST3ScanWorker PRIVATE "${VST2_SDK_DIR}")
-    target_compile_definitions(GuitarVST3ScanWorker PRIVATE JUCE_PLUGINHOST_VST=1)
+    target_include_directories(AmpForge             PRIVATE "${VST2_SDK_DIR}")
+    target_include_directories(AmpForgeScanWorker PRIVATE "${VST2_SDK_DIR}")
+    target_compile_definitions(AmpForgeScanWorker PRIVATE JUCE_PLUGINHOST_VST=1)
 else()
     message(STATUS "VST2 SDK not found — building without VST2 support. "
                    "Set -DVST2_SDK_DIR=<path> to enable.")
 endif()
 
-target_compile_definitions(GtrFxSim
+target_compile_definitions(AmpForge
     PRIVATE
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
@@ -179,7 +179,7 @@ target_compile_definitions(GtrFxSim
         JUCE_ASIO=${_juce_asio_flag}
 )
 
-target_link_libraries(GtrFxSim
+target_link_libraries(AmpForge
     PRIVATE
         juce::juce_audio_utils
         juce::juce_audio_processors
@@ -190,4 +190,4 @@ target_link_libraries(GtrFxSim
 )
 
 include(cmake/GenerateClangdCompileDb.cmake)
-guitar_host_export_clangd_compile_db(GtrFxSim)
+ampforge_export_clangd_compile_db(AmpForge)

@@ -1,4 +1,4 @@
-# Guitar MultiFX Simulator — Panduan Pengguna
+# Amp Forge — Panduan Pengguna
 
 Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/VST2. Berjalan di Windows.
 
@@ -110,7 +110,7 @@ Menyimpan dan memuat snapshot seluruh signal chain ke file `.tfpreset`.
 
 File preset menyimpan: daftar section, urutan plugin, state setiap plugin, status bypass, dan binding kontrol (slotId stabil — binding tidak rusak meski urutan section diubah).
 
-Default folder preset: `%APPDATA%\GtrFxSim\presets\`
+Default folder preset: `%APPDATA%\AmpForge\presets\`
 
 ---
 
@@ -181,13 +181,13 @@ State audio device disimpan otomatis.
 | Gejala | Solusi |
 |--------|--------|
 | Plugin tidak muncul di library | Klik **Rescan Plugins**; pastikan path folder sudah benar di **Scan Paths** |
-| Plugin muncul tapi tidak jalan | Cek log di `%APPDATA%\GtrFxSim\host.log` |
+| Plugin muncul tapi tidak jalan | Cek log di `%APPDATA%\AmpForge\host.log` |
 | "Couldn't open input device" | Sambungkan audio interface; atau buka Audio Settings dan pilih device yang ada |
 | Tidak ada suara | Cek MUTE, In Gain, Out Vol; cek bypass section/slot; cek Audio Settings |
 | Binding kontrol rusak setelah load preset lama | Re-learn binding satu kali (file lama tidak menyimpan slotId) |
 | VST2 tidak terdeteksi | Butuh Steinberg VST2 SDK ditempatkan di `vst2sdk/` lalu rebuild |
 
-**Log file:** `%APPDATA%\GtrFxSim\host.log` — semua pesan dengan prefix `[GuitarHost]`.
+**Log file:** `%APPDATA%\AmpForge\host.log` — semua pesan dengan prefix `[AmpForge]`.
 
 ---
 
@@ -201,8 +201,8 @@ Binding keyboard dikonfigurasi via **Learn Control** (lihat bagian Control Mappi
 
 | File | Lokasi |
 |------|--------|
-| Log | `%APPDATA%\GtrFxSim\host.log` |
-| Preset | `%APPDATA%\GtrFxSim\presets\*.tfpreset` |
-| Settings (device, templates, maps) | `%APPDATA%\GtrFxSim\` (ApplicationProperties) |
-| Executable host | `build/GtrFxSim_artefacts/Debug/Guitar VST3 Host.exe` |
-| Scan worker | `build/GtrFxSim_artefacts/Debug/GuitarVST3ScanWorker.exe` |
+| Log | `%APPDATA%\AmpForge\host.log` |
+| Preset | `%APPDATA%\AmpForge\presets\*.tfpreset` |
+| Settings (device, templates, maps) | `%APPDATA%\AmpForge\` (ApplicationProperties) |
+| Executable host | `build/AmpForge_artefacts/Debug/Amp Forge.exe` |
+| Scan worker | `build/AmpForge_artefacts/Debug/AmpForgeScanWorker.exe` |

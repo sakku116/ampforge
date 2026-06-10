@@ -26,23 +26,53 @@ void setupLogging()
 class MainWindow : public juce::DocumentWindow
 {
 public:
+    static constexpr const char* kWindowStateKey = "windowState";
+
     MainWindow(juce::String name) : juce::DocumentWindow(name,
                                                           juce::Desktop::getInstance().getDefaultLookAndFeel()
                                                               .findColour(juce::ResizableWindow::backgroundColourId),
                                                           juce::DocumentWindow::allButtons)
     {
         setUsingNativeTitleBar(true);
+        setResizable(true, false);
         setContentOwned(new MainComponent(), true);
-        centreWithSize(900, 600);
+
+        const auto savedState = getSettingsValue(kWindowStateKey);
+        if (savedState.isNotEmpty())
+            restoreWindowStateFromString(savedState);
+        else
+            centreWithSize(900, 600);
+
         setVisible(true);
+    }
+
+    ~MainWindow() override
+    {
+        saveWindowState();
     }
 
     void closeButtonPressed() override
     {
+        saveWindowState();
         juce::JUCEApplication::getInstance()->systemRequestedQuit();
     }
 
 private:
+    juce::String getSettingsValue(const juce::String& key)
+    {
+        if (auto* mc = dynamic_cast<MainComponent*>(getContentComponent()))
+            if (auto* s = mc->getAppSettingsFile())
+                return s->getValue(key);
+        return {};
+    }
+
+    void saveWindowState()
+    {
+        if (auto* mc = dynamic_cast<MainComponent*>(getContentComponent()))
+            if (auto* s = mc->getAppSettingsFile())
+                s->setValue(kWindowStateKey, getWindowStateAsString());
+    }
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
 };
 

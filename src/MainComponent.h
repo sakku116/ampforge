@@ -401,6 +401,11 @@ private:
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;
+
+public:
+    juce::PropertiesFile* getAppSettingsFile() { return appProperties.getUserSettings(); }
+
+private:
     static constexpr const char* audioDeviceStateKey  = "audioDeviceState";
     static constexpr const char* lastPresetPathKey    = "lastPresetPath";
     static constexpr const char* templatesStateKey    = "scenes";   // keep "scenes" for backward compat

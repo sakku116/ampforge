@@ -478,9 +478,9 @@ void MainComponent::resized()
     }
     area.removeFromBottom(gap);
 
-    // ── Content: LIBRARY panel | SIGNAL CHAIN panel ───────────────────────────
+    // ── Content: LIBRARY panel (fixed width) | SIGNAL CHAIN panel ───────────────
     auto content = area;
-    libraryPanel = content.removeFromLeft((content.getWidth() - gap) / 3);
+    libraryPanel = content.removeFromLeft(260);
     content.removeFromLeft(gap);
     chainPanel = content;
 

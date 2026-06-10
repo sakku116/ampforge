@@ -268,6 +268,76 @@ bool PluginChain::addPlugin(const juce::PluginDescription& description)
     return addPlugin(description, sid);
 }
 
+bool PluginChain::duplicatePlugin(int index)
+{
+    // Capture source slot's spec (message thread, under lock).
+    SlotSpec spec;
+    {
+        const juce::ScopedLock sl(editLock);
+        auto cur = currentList();
+        if (! juce::isPositiveAndBelow(index, (int) cur->size()))
+            return false;
+
+        const auto& src = (*cur)[(size_t) index];
+        spec.description = src->description;
+        spec.sectionId   = src->sectionId;
+        spec.bypassed    = src->bypassed.load();
+        spec.postGain    = src->postGain.load();
+        spec.customName  = src->customName;
+        if (src->instance != nullptr)
+            src->instance->getStateInformation(spec.state);
+    }
+
+    // Build new instance outside the lock (can be slow).
+    juce::String error;
+    auto newSlot = createSlot(spec.description, error);
+    if (newSlot == nullptr)
+    {
+        HostDebug::log("Duplicate FAILED: " + spec.description.name + " — " + error);
+        return false;
+    }
+
+    if (spec.state.getSize() > 0)
+        newSlot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
+
+    newSlot->postGain.store(spec.postGain);
+    newSlot->customName = spec.customName;
+    newSlot->sectionId  = spec.sectionId;
+    newSlot->slotId     = nextSlotId++;
+
+    {
+        const juce::ScopedLock sl(editLock);
+        auto cur = currentList();
+
+        if (! juce::isPositiveAndBelow(index, (int) cur->size()))
+            return false;
+
+        for (const auto& def : sectionDefs)
+        {
+            if (def.id == newSlot->sectionId)
+            {
+                newSlot->sectionBypassed.store(def.bypassed);
+                // Preset section: new slot must start bypassed to preserve exclusive-active invariant.
+                if (def.type == SectionDef::Type::preset)
+                    newSlot->bypassed.store(true);
+                else
+                    newSlot->bypassed.store(spec.bypassed);
+                break;
+            }
+        }
+
+        auto next = std::make_shared<SlotList>(*cur);
+        next->insert(next->begin() + index + 1, std::move(newSlot));
+        publish(next);
+        HostDebug::log("Chain duplicate slot " + juce::String(index)
+                       + " -> " + juce::String(index + 1)
+                       + " section=" + juce::String(spec.sectionId)
+                       + " (slots=" + juce::String((int) next->size()) + ")");
+    }
+
+    return true;
+}
+
 void PluginChain::removePlugin(int index)
 {
     const juce::ScopedLock sl(editLock);

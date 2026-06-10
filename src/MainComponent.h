@@ -263,6 +263,7 @@ private:
     void activatePresetSlotAt(int slotIndex);
     void moveSlotAt(int fromSlotIndex, int toSlotIndex, int sectionIdOverride = -1);
     void removeSlotAt(int slotIndex);
+    void duplicateSlotAt(int slotIndex);
     void openEditorAt(int slotIndex);
 
     // Section actions.

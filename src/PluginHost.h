@@ -29,6 +29,7 @@ public:
     // ── Chain editing (message thread) ───────────────────────────────────────
     bool addPlugin(const juce::PluginDescription& description);
     bool addPlugin(const juce::PluginDescription& description, int sectionId);
+    bool duplicatePlugin(int index) { return chain.duplicatePlugin(index); }
     void removePlugin(int index);
     void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);

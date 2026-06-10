@@ -47,8 +47,8 @@ Output: `build/AmpForge_artefacts/Debug/Amp Forge.exe` + `AmpForgeScanWorker.exe
 | `Preset.h/.cpp` | ValueTree ↔ XML serialization of chain snapshots (`SlotSpec[]` + `SectionDef[]`). File I/O. Version 1→2 migration (v1: no sections). |
 | `TemplateManager.h/.cpp` | Ordered list of named templates (each = chain snapshot). Serializes to ValueTree. |
 | `ControlMap.h/.cpp` | Stores trigger→action bindings and expression mappings. Pure data; owner executes. |
-| `ChainListBox.h/.cpp` | `ListBoxModel` for signal chain. Rows = `SectionHeaderComponent` (32px) or `ChainSlotComponent` (52px). All slot/section callbacks wired through `ChainListModel`. |
-| `ToneForgeLookAndFeel.h/.cpp` | Dark "stage" theme. `tf::colour::` namespace: `background`, `surface`, `accent` (teal), `danger`, `warning`, `text`. |
+| `ChainListBox.h/.cpp` | `ListBoxModel` for signal chain. Rows = `SectionHeaderComponent` or `ChainSlotComponent`, both 46px uniform height. All slot/section callbacks wired through `ChainListModel`. |
+| `ToneForgeLookAndFeel.h/.cpp` | Dark "stage" theme. `tf::colour::` namespace: `background`, `surface`, `surface2`, `surface3`, `outline`, `accent` (teal), `accentDim`, `danger`, `warn` (amber), `text`, `textDim`. |
 | `HostDebug.h` | `HostDebug::log()` — wraps `juce::Logger` with `[AmpForge]` prefix. |
 
 ---
@@ -153,6 +153,11 @@ struct ControlTrigger {
 | Section level metering | `Slot::peakLevel` atomic, `SectionHeaderComponent` timer 24fps, horizontal bar with peak-hold |
 | Volume control UI | `VolumeControl` — button (speaker icon + dB label); click opens `CallOutBox` with horizontal slider + reset button |
 | Horizontal chain view (toggle) | `ChainHorizontalView`, `SectionColumnComponent`; ↔/↕ toggle button; persisted as `chainViewMode` |
+| Duplicate plugin | Right-click → Duplicate on slot row; `PluginChain::duplicatePlugin`, `PluginHost::duplicatePlugin`, `ChainListModel::onDuplicate`, `MainComponent::duplicateSlotAt` |
+| Slot right-click context menu | Open Editor, Duplicate, Learn Control, Rename, Reset Name, Remove — all via right-click only (no dedicated row buttons for editor/remove) |
+| Section remove confirmation | Right-click → Remove Section triggers `juce::AlertWindow` confirmation before `removeSection`; no ✕ button on section header |
+| Control binding badge | Square badge left of plugin name (side = rowHeight−4 ≈ 32px); shows assigned CC/note/key label; amber fill for BYP bindings, teal for ACT; dimmed border+text when slot bypassed; empty outline when unassigned |
+| Preset row tint | Preset section slot rows have amber overlay (`warn` @ 10% alpha); selected preset row uses amber highlight |
 
 ---
 
@@ -234,6 +239,6 @@ v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` a
 
 ## Recently Completed Work (last 3 sessions)
 
-1. **Per-slot & per-section volume:** `Slot::postGain` + `SectionDef::gain` atomics; section gain applied at last slot of each section via `isLastInSection` flag (computed in `publish()`/`publishWithCrossfade()`). Level metering via `Slot::peakLevel` polled by `SectionHeaderComponent` timer. Gains persist in `.tfpreset`.
-2. **VolumeControl UI:** Replaced rotary `VolumeKnob` with `VolumeControl` — a button showing speaker icon + dB label. Click opens `juce::CallOutBox` (tooltip-style bubble) with a horizontal slider (−30…+6 dB, midpoint = 0 dB) and a "↺ 0 dB" reset button. `juce::SettableTooltipClient` inherited for tooltip support.
-3. **Horizontal chain view:** `ChainHorizontalView` + `SectionColumnComponent` added to `ChainListBox.h/.cpp`. Toggle button (↔/↕) in chain panel header switches vertical ↔ horizontal mode. Horizontal mode renders sections as side-by-side columns (200 px each, 8 px gap) inside a `juce::Viewport`. Section headers show ◀▶ instead of ▲▼. Slot DnD works cross-column via `DragAndDropTarget` on each column. Preference persisted as `chainViewMode` in `ApplicationProperties`.
+1. **Horizontal chain view:** `ChainHorizontalView` + `SectionColumnComponent` in `ChainListBox.h/.cpp`. Toggle button (↔/↕) switches vertical ↔ horizontal mode. Sections rendered as side-by-side columns (240px wide, 8px gap) in a `juce::Viewport` with horizontal scrollbar. Section headers show ◀▶ instead of ▲▼. Slot DnD works cross-column. Persisted as `chainViewMode`.
+2. **Signal chain UX polish:** Duplicate plugin via right-click (`PluginChain::duplicatePlugin`). Open Editor + Remove moved to right-click menu only — no dedicated row buttons. Section ✕ button removed; Remove Section via right-click shows `juce::AlertWindow` confirmation. Shared layout constants (`kBtnW=28`, `kVolW=30`, `kBtnGap=4`, `kRightMargin=4`) align buttons across section headers and slot rows.
+3. **Visual refinements:** Control binding badge — square (side ≈ rowHeight−4), 11pt bold font, amber/teal fill by action type, dimmed when slot bypassed. Preset slot rows have amber tint (`warn` @ 10% alpha). Uniform row height 46px (was 52px). Library and Signal Chain panel header rows vertically aligned.

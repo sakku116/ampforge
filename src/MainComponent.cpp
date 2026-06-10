@@ -37,7 +37,7 @@ MainComponent::MainComponent()
     paletteListBox.setModel(&paletteModel);
     paletteListBox.setRowHeight(26);
     paletteListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
-    chainListBox.setRowHeight(52);
+    chainListBox.setRowHeight(46);
     chainListBox.setColour(juce::ListBox::backgroundColourId, tf::colour::surface);
     addAndMakeVisible(paletteListBox);
     addAndMakeVisible(chainListBox);
@@ -75,6 +75,7 @@ MainComponent::MainComponent()
 
     chainModel.onBypass    = [this](int si) { toggleBypassAt(si); };
     chainModel.onRemove    = [this](int si) { removeSlotAt(si); };
+    chainModel.onDuplicate = [this](int si) { duplicateSlotAt(si); };
     chainListBox.onMovePlugin = [this](int from, int to, int sid) { moveSlotAt(from, to, sid); };
     chainModel.onEditor    = [this](int si) { openEditorAt(si); };
     chainModel.onSelect    = [this](int row) { chainListBox.selectRow(row); };
@@ -485,10 +486,13 @@ void MainComponent::resized()
 
     {
         auto in = libraryPanel.reduced(12);
-        paletteLabel.setBounds(in.removeFromTop(20));
-        in.removeFromTop(6);
 
-        auto filterRow = in.removeFromTop(26);
+        // Header row same height/gap as chain panel so labels and second rows align.
+        auto libHeadRow = in.removeFromTop(28);
+        paletteLabel.setBounds(libHeadRow.withTrimmedTop(4));
+        in.removeFromTop(4);
+
+        auto filterRow = in.removeFromTop(28);
         formatFilterCombo.setBounds(filterRow.removeFromLeft(72));
         filterRow.removeFromLeft(4);
         searchBox.setBounds(filterRow);
@@ -1347,6 +1351,21 @@ void MainComponent::removeSlotAt(int slotIndex)
         setTemplateDirty(true);
 }
 
+void MainComponent::duplicateSlotAt(int slotIndex)
+{
+    if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
+        return;
+
+    HostDebug::log("UI: Duplicate chain slot " + juce::String(slotIndex));
+    if (pluginHost.duplicatePlugin(slotIndex))
+    {
+        refreshChainList();
+
+        if (templateManager.getCurrentIndex() >= 0)
+            setTemplateDirty(true);
+    }
+}
+
 void MainComponent::openEditorAt(int slotIndex)
 {
     if (! juce::isPositiveAndBelow(slotIndex, pluginHost.getNumSlots()))
@@ -1369,11 +1388,28 @@ void MainComponent::addSectionOfType(PluginChain::SectionDef::Type type)
 
 void MainComponent::removeSectionAt(int sectionId)
 {
-    pluginHost.removeSection(sectionId);
-    refreshChainList();
+    juce::String sectionName;
+    for (const auto& s : pluginHost.getSectionDefs())
+        if (s.id == sectionId) { sectionName = s.name; break; }
 
-    if (templateManager.getCurrentIndex() >= 0)
-        setTemplateDirty(true);
+    auto* dialog = new juce::AlertWindow("Remove Section",
+                                         "Remove \"" + sectionName + "\"?\nAll plugins in this section will also be removed.",
+                                         juce::MessageBoxIconType::WarningIcon);
+    dialog->addButton("Remove", 1, juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton("Cancel", 0, juce::KeyPress(juce::KeyPress::escapeKey));
+
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [this, sectionId](int result)
+        {
+            if (result == 1)
+            {
+                pluginHost.removeSection(sectionId);
+                refreshChainList();
+
+                if (templateManager.getCurrentIndex() >= 0)
+                    setTemplateDirty(true);
+            }
+        }), true);
 }
 
 void MainComponent::renameSectionAt(int sectionId)

@@ -76,6 +76,8 @@ public:
     bool addPlugin(const juce::PluginDescription& description, int sectionId);
     /** Compat overload: adds to the last section. */
     bool addPlugin(const juce::PluginDescription& description);
+    /** Duplicate the slot at index, inserting the copy immediately after it. */
+    bool duplicatePlugin(int index);
     void removePlugin(int index);
     /** Moves a slot. If sectionIdOverride >= 0, assigns that section instead of inheriting
         from the displaced slot. Handles from == toIndex as a section-only change. */

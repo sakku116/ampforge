@@ -73,6 +73,7 @@ public:
     // Slot-action callbacks (receive slotIndex, not row index):
     std::function<void(int)> onBypass;
     std::function<void(int)> onRemove;
+    std::function<void(int)> onDuplicate;
     std::function<void(int)> onEditor;
     std::function<void(int)> onSelect;
     std::function<void(int)> onRename;
@@ -139,7 +140,7 @@ private:
     juce::String sectionName;
     PluginChain::SectionDef::Type sectionType = PluginChain::SectionDef::Type::stomp;
 
-    juce::TextButton upButton, downButton, removeButton, bypassButton;
+    juce::TextButton upButton, downButton, bypassButton;
     VolumeControl    volumeControl;
 
     float displayLevel    = 0.0f;   // smoothed peak level for the meter
@@ -184,7 +185,7 @@ private:
     bool dragStarted = false;
     static constexpr int kDragThreshold = 6;
 
-    juce::TextButton bypassButton, editorButton, removeButton;
+    juce::TextButton bypassButton;
     VolumeControl    volumeControl;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChainSlotComponent)
@@ -283,7 +284,7 @@ public:
     std::function<void(int fromSlot, int toSlot, int sectionIdOverride)> onMovePlugin;
 
     static constexpr int kColumnWidth = 240;
-    static constexpr int kRowHeight   = 52;
+    static constexpr int kRowHeight   = 46;
 
     void resized() override;
     void paintOverChildren(juce::Graphics&) override;

@@ -335,6 +335,12 @@ namespace
     const juce::String kEditor         = juce::String::fromUTF8("\xE2\x9A\x99");   // ⚙
     const juce::String kLeft           = juce::String::fromUTF8("\xE2\x97\x80");   // ◀
     const juce::String kRight          = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶ (same glyph, section-move context)
+
+    // Shared layout constants — keeps section-header and slot-row buttons the same size and aligned.
+    constexpr int kBtnW   = 28;
+    constexpr int kVolW   = 30;
+    constexpr int kBtnGap =  4;
+    constexpr int kRightMargin = 4;   // right-edge inset used by both row types
 }
 
 // ── Model: refreshComponentForRow ─────────────────────────────────────────────
@@ -379,12 +385,10 @@ SectionHeaderComponent::SectionHeaderComponent(ChainListModel& ownerModel) : mod
 
     styleIcon(upButton,     kUp,     tf::colour::textDim);
     styleIcon(downButton,   kDown,   tf::colour::textDim);
-    styleIcon(removeButton, kRemove, tf::colour::danger);
     styleIcon(bypassButton, kBypass, tf::colour::textDim);
 
-    upButton.onClick     = [this] { if (model.onSectionMoveUp)   model.onSectionMoveUp(sectionId);   };
-    downButton.onClick   = [this] { if (model.onSectionMoveDown) model.onSectionMoveDown(sectionId); };
-    removeButton.onClick = [this] { if (model.onSectionRemove)   model.onSectionRemove(sectionId);   };
+    upButton.onClick   = [this] { if (model.onSectionMoveUp)   model.onSectionMoveUp(sectionId);   };
+    downButton.onClick = [this] { if (model.onSectionMoveDown) model.onSectionMoveDown(sectionId); };
     bypassButton.onClick = [this]
     {
         sectionBypassed = ! sectionBypassed;
@@ -427,12 +431,11 @@ void SectionHeaderComponent::update(int rowIdx, const ChainRow& row, bool isRowS
 
 void SectionHeaderComponent::resized()
 {
-    auto area = getLocalBounds().reduced(4, 3);
-    removeButton.setBounds(area.removeFromRight(26));   area.removeFromRight(3);
-    downButton  .setBounds(area.removeFromRight(26));   area.removeFromRight(2);
-    upButton    .setBounds(area.removeFromRight(26));   area.removeFromRight(6);
-    bypassButton.setBounds(area.removeFromRight(26));   area.removeFromRight(4);
-    volumeControl.setBounds(area.removeFromRight(30).reduced(0, 3));
+    auto area = getLocalBounds().reduced(kRightMargin, 3);
+    downButton  .setBounds(area.removeFromRight(kBtnW)); area.removeFromRight(kBtnGap);
+    upButton    .setBounds(area.removeFromRight(kBtnW)); area.removeFromRight(kBtnGap);
+    bypassButton.setBounds(area.removeFromRight(kBtnW)); area.removeFromRight(kBtnGap);
+    volumeControl.setBounds(area.removeFromRight(kVolW).reduced(0, 3));
 }
 
 void SectionHeaderComponent::paint(juce::Graphics& g)
@@ -609,13 +612,9 @@ ChainSlotComponent::ChainSlotComponent(ChainListModel& ownerModel) : model(owner
         addAndMakeVisible(b);
     };
 
-    styleIcon(bypassButton,  kBypass, tf::colour::text);
-    styleIcon(editorButton,  kEditor, tf::colour::accent);
-    styleIcon(removeButton,  kRemove, tf::colour::danger);
+    styleIcon(bypassButton, kBypass, tf::colour::text);
 
     bypassButton.onClick = [this] { if (model.onBypass) model.onBypass(slotIndex); };
-    editorButton.onClick = [this] { if (model.onEditor) model.onEditor(slotIndex); };
-    removeButton.onClick = [this] { if (model.onRemove) model.onRemove(slotIndex); };
 
     volumeControl.onGainChanged = [this](float gain)
     {
@@ -666,13 +665,10 @@ void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
 
 void ChainSlotComponent::resized()
 {
-    auto area = getLocalBounds().reduced(6, 5);
+    auto area = getLocalBounds().reduced(kRightMargin, 5);
 
-    const int gap = 4;
-    removeButton.setBounds(area.removeFromRight(30));   area.removeFromRight(gap);
-    editorButton.setBounds(area.removeFromRight(34));   area.removeFromRight(gap);
-    bypassButton.setBounds(area.removeFromRight(34));   area.removeFromRight(gap);
-    volumeControl.setBounds(area.removeFromRight(32));               area.removeFromRight(gap);
+    bypassButton.setBounds(area.removeFromRight(kBtnW));  area.removeFromRight(kBtnGap);
+    volumeControl.setBounds(area.removeFromRight(kVolW)); area.removeFromRight(kBtnGap);
 
     gripArea = area.removeFromLeft(18);
     textArea = area;
@@ -686,11 +682,17 @@ void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
     if (e.mods.isRightButtonDown())
     {
         juce::PopupMenu menu;
+        menu.addItem(5, "Open Editor");
+        menu.addSeparator();
+        menu.addItem(4, "Duplicate");
+        menu.addSeparator();
         menu.addItem(1, "Learn Control");
         menu.addSeparator();
         menu.addItem(2, "Rename");
         if (hasCustomName)
             menu.addItem(3, "Reset Name");
+        menu.addSeparator();
+        menu.addItem(6, "Remove");
 
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
             [this](int result)
@@ -701,6 +703,12 @@ void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
                     model.onRename(slotIndex);
                 else if (result == 3 && model.onResetName)
                     model.onResetName(slotIndex);
+                else if (result == 4 && model.onDuplicate)
+                    model.onDuplicate(slotIndex);
+                else if (result == 5 && model.onEditor)
+                    model.onEditor(slotIndex);
+                else if (result == 6 && model.onRemove)
+                    model.onRemove(slotIndex);
             });
     }
 }
@@ -731,12 +739,23 @@ void ChainSlotComponent::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
 
-    g.setColour(selected ? tf::colour::accent.withAlpha(0.16f) : tf::colour::surface2);
+    // Preset rows use a warm amber tint to distinguish them from stomp rows.
+    g.setColour(tf::colour::surface2);
     g.fillRoundedRectangle(r, 6.0f);
-
+    if (isPreset && !selected)
+    {
+        g.setColour(tf::colour::warn.withAlpha(0.10f));
+        g.fillRoundedRectangle(r, 6.0f);
+    }
     if (selected)
     {
-        g.setColour(tf::colour::accent.withAlpha(0.7f));
+        const juce::Colour selFill   = isPreset ? tf::colour::warn.withAlpha(0.20f)
+                                                : tf::colour::accent.withAlpha(0.16f);
+        const juce::Colour selBorder = isPreset ? tf::colour::warn.withAlpha(0.65f)
+                                                : tf::colour::accent.withAlpha(0.70f);
+        g.setColour(selFill);
+        g.fillRoundedRectangle(r, 6.0f);
+        g.setColour(selBorder);
         g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.0f);
     }
 
@@ -756,15 +775,47 @@ void ChainSlotComponent::paint(juce::Graphics& g)
 
     auto a = textArea;
 
-    // Index badge.
-    auto badge = a.removeFromLeft(26).toFloat().reduced(1.0f, 7.0f);
-    g.setColour(bypassed ? tf::colour::outline : tf::colour::accentDim);
-    g.fillRoundedRectangle(badge, 4.0f);
-    g.setColour(bypassed ? tf::colour::textDim : tf::colour::text);
-    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-    g.drawText(juce::String(slotIndex + 1), badge, juce::Justification::centred);
+    // Control-binding badge — square, side = row height minus a small margin.
+    const int bSide = a.getHeight() - 4;   // e.g. 32 px at rowHeight=46
+    auto badge = a.removeFromLeft(bSide + 8).toFloat()
+                   .withSizeKeepingCentre((float)bSide, (float)bSide);
 
-    a.removeFromLeft(8);
+    if (controlHint.isNotEmpty())
+    {
+        // Strip "BYP: " / "ACT: " prefix, then MIDI channel suffix, then "Key " prefix.
+        const int colonIdx = controlHint.indexOf(": ");
+        const juce::String prefix = colonIdx >= 0 ? controlHint.substring(0, colonIdx) : "";
+        juce::String label = colonIdx >= 0 ? controlHint.substring(colonIdx + 2) : controlHint;
+        const int chanIdx = label.indexOf(" (ch ");
+        if (chanIdx >= 0) label = label.substring(0, chanIdx);
+        if (label.startsWith("Key ")) label = label.substring(4);
+
+        if (!bypassed)
+        {
+            const bool isByp = (prefix == "BYP");
+            g.setColour(isByp ? tf::colour::warn.withAlpha(0.22f) : tf::colour::accent.withAlpha(0.22f));
+            g.fillRoundedRectangle(badge, 4.0f);
+            g.setColour(isByp ? tf::colour::warn.withAlpha(0.55f) : tf::colour::accent.withAlpha(0.55f));
+            g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
+            g.setColour(isByp ? tf::colour::warn : tf::colour::accent);
+        }
+        else
+        {
+            g.setColour(tf::colour::textDim.withAlpha(0.55f));
+            g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
+            g.setColour(tf::colour::textDim);
+        }
+
+        g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+        g.drawText(label, badge, juce::Justification::centred);
+    }
+    else
+    {
+        g.setColour(tf::colour::outline.withAlpha(0.28f));
+        g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.7f);
+    }
+
+    a.removeFromLeft(4);
 
     auto nameArea = a.removeFromTop(a.getHeight() / 2 + 2);
 
@@ -776,15 +827,8 @@ void ChainSlotComponent::paint(juce::Graphics& g)
     juce::String sub = "[" + format + "]";
     if (hasCustomName)
         sub += "  " + originalName;
-    if (controlHint.isNotEmpty())
-    {
-        g.setColour(tf::colour::accent.withAlpha(0.75f));
-        // Draw hint right-aligned within the subtitle area before the bypassed tag
-        g.drawText(controlHint, a, juce::Justification::centredRight);
-        sub += "   ";
-    }
     if (bypassed)
-        sub += "bypassed";
+        sub += "  bypassed";
     g.setColour(tf::colour::textDim);
     g.drawText(sub, a, juce::Justification::topLeft);
 }
@@ -1150,7 +1194,7 @@ void SectionColumnComponent::itemDropped(const SourceDetails& details)
 ChainHorizontalView::ChainHorizontalView(ChainListModel& ownerModel)
     : model(ownerModel)
 {
-    viewport.setScrollBarsShown(false, false);   // mouse-wheel scrolling, no visible bars
+    viewport.setScrollBarsShown(false, true);    // show horizontal scrollbar when content overflows
     viewport.setViewedComponent(&contentArea, false);
     addAndMakeVisible(viewport);
 }

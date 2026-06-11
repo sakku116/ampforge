@@ -48,8 +48,8 @@ private:
 
         void closeButtonPressed() override
         {
-            onCloseCallback();
             setVisible(false);
+            juce::MessageManager::callAsync(onCloseCallback);
         }
 
     private:
@@ -193,8 +193,8 @@ private:
 
         void closeButtonPressed() override
         {
-            onCloseCallback();
             setVisible(false);
+            juce::MessageManager::callAsync(onCloseCallback);
         }
 
     private:

@@ -110,9 +110,9 @@ public:
     bool activateChain(int handle, int crossfadeMs);
     void releasePreload(int handle);
 
-    /** Incremental async build: loads one plugin per message dispatch so the UI stays
-        responsive. onProgress(loaded, total) is called after each slot. onComplete(handle,
-        allOk) is called on the message thread when all slots are done; the caller should
+    /** Async build on a background thread: loads all plugins without blocking the message
+        thread. onProgress(loaded, total) is posted to the message thread after each slot.
+        onComplete(handle, allOk) is posted to the message thread when done; the caller should
         pass handle to activateChain() to make the chain live. Cancels any in-progress
         async build first. */
     void buildChainAsync(const juce::Array<SlotSpec>& specs,
@@ -190,21 +190,19 @@ private:
     std::map<int, std::shared_ptr<SlotList>> preloaded;   // message-thread: chains built ahead
     int nextPreloadHandle = 1;
 
-    struct AsyncBuildState
-    {
-        juce::Array<SlotSpec>    specs;
-        juce::Array<SectionDef>  targetSections;
-        std::shared_ptr<SlotList> partial;
-        int  index  = 0;
-        bool allOk  = true;
-        int  epoch  = 0;
-        std::function<void(int, int)> onProgress;
-        std::function<void(int, bool)> onComplete;
-    };
-    std::unique_ptr<AsyncBuildState> asyncState;   // message-thread only
-    std::atomic<int> asyncEpoch { 0 };
+    class PluginLoaderThread;
+    friend class PluginLoaderThread;
 
-    void stepAsyncBuild();   // callAsync dispatch handler
+    std::atomic<int> asyncEpoch { 0 };
+    std::shared_ptr<std::atomic<bool>> loaderAliveFlag { std::make_shared<std::atomic<bool>>(true) };
+    std::unique_ptr<PluginLoaderThread> loaderThread;
+    std::vector<std::unique_ptr<PluginLoaderThread>> loaderGraveyard;
+
+    void commitAsyncBuild(const juce::Array<SectionDef>& sections,
+                          std::shared_ptr<SlotList> partial,
+                          int epoch, int newNextSlotId,
+                          std::function<void(int, bool)> onComplete,
+                          bool allOk);
 
     // audio-thread only:
     juce::AudioBuffer<float> fadeScratch;

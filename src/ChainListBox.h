@@ -146,6 +146,8 @@ private:
     float displayLevel    = 0.0f;   // smoothed peak level for the meter
     float peakHold        = 0.0f;   // peak-hold value
     int   peakHoldCounter = 0;      // frames before peak starts decaying
+    float paintedLevel    = -1.0f;  // last values pushed to screen — skip repaint when unchanged
+    float paintedPeak     = -1.0f;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SectionHeaderComponent)
 };
@@ -257,6 +259,8 @@ private:
     float displayLevel    = 0.0f;
     float peakHold        = 0.0f;
     int   peakHoldCounter = 0;
+    float paintedLevel    = -1.0f;  // last values pushed to screen — skip repaint when unchanged
+    float paintedPeak     = -1.0f;
 
     void timerCallback() override;
 

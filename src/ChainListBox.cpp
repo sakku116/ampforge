@@ -224,7 +224,17 @@ void LevelMeterBar::timerCallback()
         --peakHoldCounter;
     else
         peakHold *= 0.94f;
-    repaint();
+
+    // Snap negligible values to zero so an idle meter stops repainting entirely.
+    if (displayLevel < 1.0e-4f) displayLevel = 0.0f;
+    if (peakHold     < 1.0e-4f) peakHold     = 0.0f;
+
+    if (displayLevel != paintedLevel || peakHold != paintedPeak)
+    {
+        paintedLevel = displayLevel;
+        paintedPeak  = peakHold;
+        repaint();
+    }
 }
 
 void LevelMeterBar::paint(juce::Graphics& g)
@@ -567,7 +577,16 @@ void SectionHeaderComponent::timerCallback()
             peakHold = peakHold * 0.92f;
         }
 
-        repaint();
+        // Snap negligible values to zero so an idle meter stops repainting entirely.
+        if (displayLevel < 1.0e-4f) displayLevel = 0.0f;
+        if (peakHold     < 1.0e-4f) peakHold     = 0.0f;
+
+        if (displayLevel != paintedLevel || peakHold != paintedPeak)
+        {
+            paintedLevel = displayLevel;
+            paintedPeak  = peakHold;
+            repaint();
+        }
     }
 }
 

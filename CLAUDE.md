@@ -20,7 +20,9 @@ Output: `build/AmpForge_artefacts/Debug/Amp Forge.exe` + `AmpForgeScanWorker.exe
 - ASIO: place SDK at `asio/` in project root → `JUCE_ASIO=1`
 - VST2: place SDK at `vst2sdk/` in project root → `JUCE_PLUGINHOST_VST=1`
 
-**Config/data location:** `%APPDATA%\AmpForge\` — log (`host.log`), presets (`presets/*.tfpreset`), app settings (audio device, templates, control map, scan paths).
+**Config/data location:** `%APPDATA%\AmpForge\` — log (`host.log`), presets (`presets/*.tfpreset`), app settings (audio device, templates, control map, scan paths), plugin scan cache (`pluginCache.xml`).
+
+**Plugin scan cache:** `PluginScanner` persists `KnownPluginList` + a per-file modtime map to `pluginCache.xml`. Startup uses `scanAll(false)` (incremental — only spawns a scan subprocess for new/changed files; deleted plugins pruned). The "Rescan" button uses `scanAll(true)` (clear + full rescan). Makes startup near-instant after the first scan.
 
 ---
 

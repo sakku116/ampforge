@@ -115,13 +115,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
         }
     }
 
-    // Measure post-input-gain peak (enters the plugin chain).
-    {
-        float pk = 0.0f;
-        for (int ch = 0; ch < channelsToUse; ++ch)
-            pk = juce::jmax(pk, processingBuffer.getMagnitude(ch, 0, numSamples));
-        masterInputPeakLevel.store(pk);
-    }
+    // Measure post-input-gain peak (enters the plugin chain). Every processing
+    // channel holds a copy of the same selected input, so channel 0 is
+    // representative — no need to scan all channels.
+    masterInputPeakLevel.store(channelsToUse > 0 ? processingBuffer.getMagnitude(0, 0, numSamples)
+                                                  : 0.0f);
 
     midiBuffer.clear();
     midiCollector.removeNextBlockOfMessages(midiBuffer, numSamples);   // live MIDI input

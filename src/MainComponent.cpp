@@ -546,7 +546,7 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &scanButton)
     {
         HostDebug::log("UI: Rescan Plugins clicked");
-        pluginScanner.scanAll();
+        pluginScanner.scanAll(true);   // force full rescan
         refreshPaletteList();
         return;
     }

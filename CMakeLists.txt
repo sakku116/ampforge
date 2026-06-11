@@ -94,6 +94,24 @@ if(MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
+# Link-Time / Interprocedural Optimization for optimized builds only.
+# Smaller binaries and faster DSP; left off for Debug to keep builds quick.
+# ---------------------------------------------------------------------------
+include(CheckIPOSupported)
+check_ipo_supported(RESULT _ipo_supported OUTPUT _ipo_output LANGUAGES CXX)
+
+if(_ipo_supported)
+    foreach(_tgt AmpForge AmpForgeScanWorker)
+        set_property(TARGET ${_tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE        ON)
+        set_property(TARGET ${_tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON)
+        set_property(TARGET ${_tgt} PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL      ON)
+    endforeach()
+    message(STATUS "IPO/LTO enabled for optimized configurations.")
+else()
+    message(STATUS "IPO/LTO not supported: ${_ipo_output}")
+endif()
+
+# ---------------------------------------------------------------------------
 # ASIO support (optional) — requires Steinberg ASIO SDK
 #   Download from: https://www.steinberg.net/asiosdk/
 #   Then set: -DASIO_SDK_DIR="C:/path/to/asiosdk" at configure time

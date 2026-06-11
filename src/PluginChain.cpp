@@ -5,6 +5,135 @@
 #include <algorithm>
 #include <cmath>
 
+// ── Background plugin loader thread ─────────────────────────────────────────
+// Defined here (before PluginChain methods) so the destructor can call stopThread().
+
+class PluginChain::PluginLoaderThread : public juce::Thread
+{
+public:
+    PluginLoaderThread(PluginChain& owner,
+                       std::shared_ptr<std::atomic<bool>> aliveFlag,
+                       juce::Array<SlotSpec> specs,
+                       juce::Array<SectionDef> sections,
+                       int capturedEpoch,
+                       int startSlotId,
+                       std::function<void(int, int)> onProgress,
+                       std::function<void(int, bool)> onComplete)
+        : juce::Thread("AmpForge:PluginLoader"),
+          owner(owner),
+          aliveFlag(std::move(aliveFlag)),
+          specs(std::move(specs)),
+          sections(std::move(sections)),
+          capturedEpoch(capturedEpoch),
+          localNextSlotId(startSlotId),
+          onProgress(std::move(onProgress)),
+          onComplete(std::move(onComplete))
+    {}
+
+    void run() override
+    {
+        auto partial = std::make_shared<PluginChain::SlotList>();
+        bool allOk = true;
+        const int total = specs.size();
+
+        for (int i = 0; i < total; ++i)
+        {
+            if (threadShouldExit() || owner.asyncEpoch.load() != capturedEpoch)
+                return;
+
+            const auto& spec = specs[i];
+            juce::String error;
+            auto slot = owner.createSlot(spec.description, error);
+
+            if (slot != nullptr)
+            {
+                if (spec.state.getSize() > 0)
+                    slot->instance->setStateInformation(spec.state.getData(),
+                                                         (int) spec.state.getSize());
+
+                slot->bypassed .store(spec.bypassed);
+                slot->postGain .store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
+                slot->customName = spec.customName;
+
+                if (spec.slotId > 0)
+                {
+                    slot->slotId = spec.slotId;
+                    localNextSlotId = std::max(localNextSlotId, spec.slotId + 1);
+                }
+                else
+                {
+                    slot->slotId = localNextSlotId++;
+                }
+
+                // Validate sectionId against the target sections.
+                bool validSec = false;
+                for (const auto& def : sections)
+                {
+                    if (def.id == spec.sectionId)
+                    {
+                        validSec = true;
+                        slot->sectionBypassed.store(def.bypassed);
+                        break;
+                    }
+                }
+                slot->sectionId = validSec ? spec.sectionId
+                                           : (sections.isEmpty() ? 1 : sections[0].id);
+
+                partial->push_back(std::move(slot));
+            }
+            else
+            {
+                HostDebug::log("Loader thread: slot FAILED " + spec.description.name + " — " + error);
+                allOk = false;
+            }
+
+            // Post progress to the message thread between each slot.
+            const int loaded = i + 1;
+            if (onProgress)
+            {
+                auto cb = onProgress;
+                juce::MessageManager::callAsync([cb, loaded, total]() mutable {
+                    cb(loaded, total);
+                });
+            }
+        }
+
+        if (threadShouldExit() || owner.asyncEpoch.load() != capturedEpoch)
+            return;
+
+        // Post completion to the message thread.
+        auto& ownerRef      = owner;
+        auto  flag          = aliveFlag;
+        auto  capturedSects = sections;
+        auto  capturedPart  = partial;
+        auto  epoch         = capturedEpoch;
+        auto  slotId        = localNextSlotId;
+        auto  completeCb    = onComplete;
+        const bool ok       = allOk;
+
+        juce::MessageManager::callAsync(
+            [flag, &ownerRef, capturedSects, capturedPart, epoch, slotId, completeCb, ok]() mutable
+            {
+                if (! flag->load())
+                    return;   // PluginChain is being destroyed
+                ownerRef.commitAsyncBuild(capturedSects, capturedPart, epoch,
+                                          slotId, std::move(completeCb), ok);
+            });
+    }
+
+private:
+    PluginChain& owner;
+    std::shared_ptr<std::atomic<bool>> aliveFlag;
+    juce::Array<SlotSpec>   specs;
+    juce::Array<SectionDef> sections;
+    int capturedEpoch;
+    int localNextSlotId;
+    std::function<void(int, int)> onProgress;
+    std::function<void(int, bool)> onComplete;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 PluginChain::PluginChain(juce::AudioPluginFormatManager& manager) : formatManager(manager)
 {
     sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
@@ -12,6 +141,17 @@ PluginChain::PluginChain(juce::AudioPluginFormatManager& manager) : formatManage
 
 PluginChain::~PluginChain()
 {
+    // Signal all loader threads to stop and wait for them before destroying state they reference.
+    loaderAliveFlag->store(false);
+    asyncEpoch.fetch_add(1);
+
+    if (loaderThread != nullptr)
+        loaderThread->stopThread(2000);
+
+    for (auto& t : loaderGraveyard)
+        t->stopThread(2000);
+    loaderGraveyard.clear();
+
     const juce::ScopedLock sl(editLock);
     activeList.store(std::make_shared<SlotList>());
     retired.clear();   // destroys remaining instances on the message thread
@@ -823,127 +963,87 @@ void PluginChain::releasePreload(int handle)
     preloaded.erase(handle);
 }
 
+// ── Async build entry points ─────────────────────────────────────────────────
+
 void PluginChain::buildChainAsync(const juce::Array<SlotSpec>& specs,
                                    const juce::Array<SectionDef>& sections,
                                    std::function<void(int, int)> onProgress,
                                    std::function<void(int, bool)> onComplete)
 {
     asyncEpoch.fetch_add(1);
-    asyncState = std::make_unique<AsyncBuildState>();
-    asyncState->specs          = specs;
-    asyncState->targetSections = sections;
-    asyncState->partial        = std::make_shared<SlotList>();
-    asyncState->index          = 0;
-    asyncState->allOk          = true;
-    asyncState->epoch          = asyncEpoch.load();
-    asyncState->onProgress     = std::move(onProgress);
-    asyncState->onComplete     = std::move(onComplete);
 
-    juce::MessageManager::callAsync([this] { stepAsyncBuild(); });
+    // Move the old thread into the graveyard so it can finish its current slot naturally
+    // (it will check asyncEpoch / threadShouldExit and exit without calling back).
+    if (loaderThread != nullptr)
+    {
+        loaderThread->signalThreadShouldExit();
+        loaderGraveyard.push_back(std::move(loaderThread));
+    }
+
+    // Prune graveyard threads that have already finished.
+    loaderGraveyard.erase(
+        std::remove_if(loaderGraveyard.begin(), loaderGraveyard.end(),
+                       [](const auto& t) { return ! t->isThreadRunning(); }),
+        loaderGraveyard.end());
+
+    loaderThread = std::make_unique<PluginLoaderThread>(
+        *this, loaderAliveFlag,
+        specs, sections,
+        asyncEpoch.load(), nextSlotId,
+        std::move(onProgress), std::move(onComplete));
+
+    loaderThread->startThread(juce::Thread::Priority::low);
 }
 
 void PluginChain::cancelAsyncBuild()
 {
     asyncEpoch.fetch_add(1);
-    asyncState.reset();
+    if (loaderThread != nullptr)
+        loaderThread->signalThreadShouldExit();
 }
 
-void PluginChain::stepAsyncBuild()
+void PluginChain::commitAsyncBuild(const juce::Array<SectionDef>& targetSections,
+                                    std::shared_ptr<SlotList> partial,
+                                    int epoch, int newNextSlotId,
+                                    std::function<void(int, bool)> onComplete,
+                                    bool allOk)
 {
-    if (! asyncState || asyncState->epoch != asyncEpoch.load())
-        return;   // cancelled
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
 
-    auto& state = *asyncState;
+    if (asyncEpoch.load() != epoch)
+        return;   // a newer build started — discard this result
 
-    if (state.index >= state.specs.size())
+    // Commit section defs on the message thread.
+    sectionDefs.clear();
+    for (const auto& s : targetSections)
+        sectionDefs.push_back(s);
+    if (sectionDefs.empty())
+        sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
+
+    nextSectionId   = 1;
+    nextStompCount  = 0;
+    nextPresetCount = 0;
+    for (const auto& def : sectionDefs)
     {
-        // All slots built. Commit sectionDefs and store as preloaded.
-        sectionDefs.clear();
-        for (const auto& s : state.targetSections)
-            sectionDefs.push_back(s);
-        if (sectionDefs.empty())
-            sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
-
-        nextSectionId   = 1;
-        nextStompCount  = 0;
-        nextPresetCount = 0;
-        for (const auto& def : sectionDefs)
-        {
-            nextSectionId = std::max(nextSectionId, def.id + 1);
-            if (def.type == SectionDef::Type::stomp) ++nextStompCount;
-            else                                     ++nextPresetCount;
-        }
-
-        int handle;
-        {
-            const juce::ScopedLock sl(editLock);
-            handle = nextPreloadHandle++;
-            preloaded[handle] = state.partial;
-        }
-
-        auto onComplete = std::move(state.onComplete);
-        const bool allOk = state.allOk;
-        asyncState.reset();
-
-        HostDebug::log("Async chain build complete: handle=" + juce::String(handle)
-                       + " allOk=" + juce::String((int) allOk));
-
-        if (onComplete) onComplete(handle, allOk);
-        return;
+        nextSectionId = std::max(nextSectionId, def.id + 1);
+        if (def.type == SectionDef::Type::stomp) ++nextStompCount;
+        else                                     ++nextPresetCount;
     }
 
-    const auto& spec = state.specs[state.index];
-    juce::String error;
-    auto slot = createSlot(spec.description, error);
+    nextSlotId = std::max(nextSlotId, newNextSlotId);
 
-    if (slot != nullptr)
+    int handle;
     {
-        if (spec.state.getSize() > 0)
-            slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
-
-        slot->bypassed .store(spec.bypassed);
-        slot->postGain .store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
-        slot->customName = spec.customName;
-
-        if (spec.slotId > 0)
-        {
-            slot->slotId = spec.slotId;
-            nextSlotId   = std::max(nextSlotId, spec.slotId + 1);
-        }
-        else
-        {
-            slot->slotId = nextSlotId++;
-        }
-
-        // Validate sectionId against the target sections (not yet committed to sectionDefs).
-        const auto& targetSects = state.targetSections;
-        bool validSec = false;
-        for (const auto& def : targetSects)
-        {
-            if (def.id == spec.sectionId)
-            {
-                validSec = true;
-                slot->sectionBypassed.store(def.bypassed);
-                break;
-            }
-        }
-        slot->sectionId = validSec ? spec.sectionId
-                                   : (targetSects.isEmpty() ? 1 : targetSects[0].id);
-
-        state.partial->push_back(std::move(slot));
-    }
-    else
-    {
-        HostDebug::log("Async chain build: slot FAILED " + spec.description.name + " — " + error);
-        state.allOk = false;
+        const juce::ScopedLock sl(editLock);
+        handle = nextPreloadHandle++;
+        preloaded[handle] = std::move(partial);
     }
 
-    state.index++;
+    HostDebug::log("Async chain build complete (background): handle=" + juce::String(handle)
+                   + " allOk=" + juce::String((int) allOk));
 
-    if (state.onProgress)
-        state.onProgress(state.index, state.specs.size());
-
-    juce::MessageManager::callAsync([this] { stepAsyncBuild(); });
+    if (onComplete)
+        onComplete(handle, allOk);
 }
 
 int PluginChain::getNumSlots() const

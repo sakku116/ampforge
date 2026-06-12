@@ -376,6 +376,8 @@ private:
 
     // Panel backgrounds, computed in resized() and drawn in paint().
     juce::Rectangle<int> headerPanel, libraryPanel, chainPanel, footerPanel;
+    int footerSep1Y = 0;   // y of separator line between templates and master sections
+    int footerSep2Y = 0;   // y of separator line between master and control sections
 
     std::unique_ptr<AudioSettingsWindow> audioSettingsWindow;
     std::unique_ptr<ScanPathsWindow>     scanPathsWindow;

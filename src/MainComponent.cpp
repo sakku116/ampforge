@@ -235,24 +235,10 @@ MainComponent::MainComponent()
     setupSlider(inputGainSlider,  1.0f, [this] { audioEngine.setMasterInputGain((float) inputGainSlider.getValue()); });
     setupSlider(outputVolSlider,  1.0f, [this] { audioEngine.setMasterOutputGain((float) outputVolSlider.getValue()); });
 
-    inputGainSlider.setTooltip("Master input gain (0 = silence, 1 = unity, 2 = +6 dB)");
-    outputVolSlider.setTooltip("Master output volume (0 = silence, 1 = unity, 2 = +6 dB)");
-
-    const juce::String kReset = juce::String::fromUTF8("\xE2\x86\xBA");   // ↺
-    inputGainResetButton.setButtonText(kReset);
-    outputVolResetButton.setButtonText(kReset);
-    inputGainResetButton.setTooltip("Reset input gain to unity (1.0)");
-    outputVolResetButton.setTooltip("Reset output volume to unity (1.0)");
-    inputGainResetButton.onClick = [this]
-    {
-        inputGainSlider.setValue(1.0, juce::sendNotification);
-    };
-    outputVolResetButton.onClick = [this]
-    {
-        outputVolSlider.setValue(1.0, juce::sendNotification);
-    };
-    addAndMakeVisible(inputGainResetButton);
-    addAndMakeVisible(outputVolResetButton);
+    inputGainSlider.setDoubleClickReturnValue(true, 1.0);
+    inputGainSlider.setTooltip("Master input gain (0–2) — double-click to reset to unity");
+    outputVolSlider.setDoubleClickReturnValue(true, 1.0);
+    outputVolSlider.setTooltip("Master output volume (0–2) — double-click to reset to unity");
 
     muteButton.setTooltip("Mute / unmute master output");
     muteButton.onClick = [this]
@@ -268,6 +254,8 @@ MainComponent::MainComponent()
 
     masterInputMeter.getLevel  = [this] { return audioEngine.getMasterInputPeakLevel(); };
     masterOutputMeter.getLevel = [this] { return audioEngine.getMasterOutputPeakLevel(); };
+    masterInputMeter.compact  = true;
+    masterOutputMeter.compact = true;
     addAndMakeVisible(masterInputMeter);
     addAndMakeVisible(masterOutputMeter);
 
@@ -390,6 +378,16 @@ void MainComponent::paint(juce::Graphics& g)
     drawPanel(chainPanel);
     drawPanel(footerPanel);
 
+    // Thin separator lines between footer sections (skip the label column on the left).
+    if (footerSep1Y > 0 && footerSep2Y > 0)
+    {
+        const int sepX = footerPanel.getX() + 14 + 70;
+        const int sepW = footerPanel.getWidth() - 28 - 70;
+        g.setColour(tf::colour::outline.withAlpha(0.25f));
+        g.fillRect(sepX, footerSep1Y, sepW, 1);
+        g.fillRect(sepX, footerSep2Y, sepW, 1);
+    }
+
     // Accent flourish under the title.
     if (! headerPanel.isEmpty())
     {
@@ -401,7 +399,7 @@ void MainComponent::paint(juce::Graphics& g)
 
 void MainComponent::resized()
 {
-    const int pad = 14, gap = 10, rowH = 34, footerH = 175;
+    const int pad = 14, gap = 10, rowH = 28, footerH = 128;
     auto area = getLocalBounds().reduced(pad);
 
     // ── Header bar (title + live metrics) ─────────────────────────────────────
@@ -425,57 +423,59 @@ void MainComponent::resized()
     // ── Footer panel (scenes + control), pinned to the bottom ─────────────────
     footerPanel = area.removeFromBottom(footerH);
     {
-        auto f = footerPanel.reduced(14, 12);
+        auto f = footerPanel.reduced(14, 10);
 
-        // Templates row: [TEMPLATES] [Dropdown] [◀ ▶] [⊕ ↑ ✎ ✕] [● modified — right]
+        // ─ Templates row ──────────────────────────────────────────────────────
         auto sceneRow = f.removeFromTop(rowH);
-        templatesLabel   .setBounds(sceneRow.removeFromLeft(70));
-        templateSelector.setBounds(sceneRow.removeFromLeft(200));
-        sceneRow.removeFromLeft(8);
-        prevTemplateButton.setBounds(sceneRow.removeFromLeft(34));
+        templatesLabel    .setBounds(sceneRow.removeFromLeft(70));
+        templateSelector  .setBounds(sceneRow.removeFromLeft(200));
+        sceneRow.removeFromLeft(6);
+        prevTemplateButton.setBounds(sceneRow.removeFromLeft(rowH));
         sceneRow.removeFromLeft(4);
-        nextTemplateButton.setBounds(sceneRow.removeFromLeft(34));
-        sceneRow.removeFromLeft(8);
+        nextTemplateButton.setBounds(sceneRow.removeFromLeft(rowH));
+        sceneRow.removeFromLeft(6);
         for (auto* b : { &captureTemplateButton, &updateTemplateButton,
                          &renameTemplateButton,  &deleteTemplateButton })
         {
-            b->setBounds(sceneRow.removeFromLeft(34));
+            b->setBounds(sceneRow.removeFromLeft(rowH));
             sceneRow.removeFromLeft(4);
         }
         templateDirtyLabel.setBounds(sceneRow.removeFromLeft(88));
 
-        f.removeFromTop(8);
-
-        auto masterRow = f.removeFromTop(rowH);
-        masterLabel         .setBounds(masterRow.removeFromLeft(70));
-        inputGainLabel      .setBounds(masterRow.removeFromLeft(50));
-        inputGainSlider     .setBounds(masterRow.removeFromLeft(110));
-        inputGainResetButton.setBounds(masterRow.removeFromLeft(24));
-        masterRow.removeFromLeft(8);
-        outputVolLabel      .setBounds(masterRow.removeFromLeft(50));
-        outputVolSlider     .setBounds(masterRow.removeFromLeft(110));
-        outputVolResetButton.setBounds(masterRow.removeFromLeft(24));
-        masterRow.removeFromLeft(8);
-        muteButton          .setBounds(masterRow.removeFromLeft(60));
-        masterRow.removeFromLeft(12);
-        inputChLabel        .setBounds(masterRow.removeFromLeft(38));
-        inputChannelCombo   .setBounds(masterRow.removeFromLeft(120));
-
-        // ── Level meter row (aligns under input/output sliders) ───────────────
-        f.removeFromTop(4);
-        auto meterRow = f.removeFromTop(30);
-        meterRow.removeFromLeft(70 + 50);          // align under inputGainLabel+slider
-        masterInputMeter .setBounds(meterRow.removeFromLeft(110 + 24));
-        meterRow.removeFromLeft(8 + 50);           // gap + outputVolLabel
-        masterOutputMeter.setBounds(meterRow.removeFromLeft(110 + 24));
-
+        footerSep1Y = f.getY() + 3;   // midpoint of the 6px gap below templates
         f.removeFromTop(6);
 
+        // ─ Master area: controls (rowH) + meter strip (8px) ──────────────────
+        auto masterArea = f.removeFromTop(rowH + 4 + 8);
+        auto masterRow  = masterArea.removeFromTop(rowH);
+        masterLabel    .setBounds(masterRow.removeFromLeft(70));
+        inputGainLabel .setBounds(masterRow.removeFromLeft(46));
+        inputGainSlider.setBounds(masterRow.removeFromLeft(120));
+        masterRow.removeFromLeft(8);
+        outputVolLabel .setBounds(masterRow.removeFromLeft(46));
+        outputVolSlider.setBounds(masterRow.removeFromLeft(120));
+        masterRow.removeFromLeft(8);
+        muteButton     .setBounds(masterRow.removeFromLeft(52));
+        masterRow.removeFromLeft(10);
+        inputChLabel   .setBounds(masterRow.removeFromLeft(34));
+        inputChannelCombo.setBounds(masterRow.removeFromLeft(110));
+
+        masterArea.removeFromTop(4);                          // gap before meter strip
+        auto meterRow = masterArea;                           // remaining 8px
+        meterRow.removeFromLeft(70 + 46);                    // skip MASTER label + In Gain label
+        masterInputMeter .setBounds(meterRow.removeFromLeft(120));
+        meterRow.removeFromLeft(8 + 46);                     // gap + Out Vol label
+        masterOutputMeter.setBounds(meterRow.removeFromLeft(120));
+
+        footerSep2Y = f.getY() + 3;   // midpoint of the 6px gap below master area
+        f.removeFromTop(6);
+
+        // ─ Control row ────────────────────────────────────────────────────────
         auto controlRow = f.removeFromTop(rowH);
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
-        learnExprButton         .setBounds(controlRow.removeFromLeft(120)); controlRow.removeFromLeft(5);
-        clearMapsButton         .setBounds(controlRow.removeFromLeft(88));  controlRow.removeFromLeft(10);
-        controlLabel.setBounds(controlRow);
+        learnExprButton    .setBounds(controlRow.removeFromLeft(110)); controlRow.removeFromLeft(5);
+        clearMapsButton    .setBounds(controlRow.removeFromLeft(80));  controlRow.removeFromLeft(8);
+        controlLabel       .setBounds(controlRow);
     }
     area.removeFromBottom(gap);
 

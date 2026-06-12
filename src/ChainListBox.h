@@ -183,12 +183,12 @@ private:
     juce::Rectangle<int> gripArea;
 
     juce::String controlHint;
+    juce::Rectangle<float> badgeRect;
 
     bool dragStarted = false;
     static constexpr int kDragThreshold = 6;
 
-    juce::TextButton bypassButton;
-    VolumeControl    volumeControl;
+    VolumeControl volumeControl;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ChainSlotComponent)
 };
@@ -244,6 +244,9 @@ public:
 
     /** Assign before the component is shown. Returns raw linear peak (0..2+). */
     std::function<float()> getLevel;
+
+    /** When true, skips the dB scale labels so the bar renders at any small height. */
+    bool compact = false;
 
     LevelMeterBar();
 

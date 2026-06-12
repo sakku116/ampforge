@@ -243,30 +243,33 @@ void LevelMeterBar::paint(juce::Graphics& g)
     const int w = bounds.getWidth();
     const int h = bounds.getHeight();
 
-    // Layout: top region for labels, bottom for the bar.
-    constexpr int kLabelH = 13;
-    const int barTop = bounds.getY() + kLabelH + 1;
-    const int barH   = h - kLabelH - 1;
+    // Layout: optional label region on top, bar below.
+    const int kLabelH = compact ? 0 : 13;
+    const int barTop  = bounds.getY() + kLabelH + (compact ? 0 : 1);
+    const int barH    = h - kLabelH - (compact ? 0 : 1);
 
-    if (barH < 3) return;
+    if (barH < 2) return;
 
     // dB → pixel X helper.
     auto dBtoX = [&](float dB) -> int {
         return bounds.getX() + juce::roundToInt(toNorm(dB) * (float)w);
     };
 
-    // ── dB scale labels ──────────────────────────────────────────────────────
-    constexpr float ticksDb[]    = { -60.0f, -40.0f, -20.0f, -12.0f, -6.0f, 0.0f, 6.0f };
-    constexpr const char* labels[] = { "-60", "-40", "-20", "-12", "-6", "0", "+6" };
+    constexpr float ticksDb[]      = { -60.0f, -40.0f, -20.0f, -12.0f, -6.0f, 0.0f, 6.0f };
+    constexpr const char* tickLabels[] = { "-60",  "-40",  "-20",  "-12",  "-6",  "0", "+6" };
 
-    g.setFont(juce::FontOptions(9.0f));
-    for (int i = 0; i < 7; ++i)
+    // ── dB scale labels (full mode only) ─────────────────────────────────────
+    if (!compact)
     {
-        const int x = dBtoX(ticksDb[i]);
-        g.setColour(tf::colour::textDim.withAlpha(0.65f));
-        g.drawText(juce::String(labels[i]),
-                   x - 12, bounds.getY(), 24, kLabelH,
-                   juce::Justification::centred, false);
+        g.setFont(juce::FontOptions(9.0f));
+        for (int i = 0; i < 7; ++i)
+        {
+            const int x = dBtoX(ticksDb[i]);
+            g.setColour(tf::colour::textDim.withAlpha(0.65f));
+            g.drawText(juce::String(tickLabels[i]),
+                       x - 12, bounds.getY(), 24, kLabelH,
+                       juce::Justification::centred, false);
+        }
     }
 
     // ── Bar background ────────────────────────────────────────────────────────
@@ -297,12 +300,15 @@ void LevelMeterBar::paint(juce::Graphics& g)
         fillZone(juce::Colour(0xffef4444), yellowEnd,   levelX);
     }
 
-    // ── Tick-mark hairlines on the bar ────────────────────────────────────────
-    for (int i = 0; i < 7; ++i)
+    // ── Tick-mark hairlines (full mode only) ─────────────────────────────────
+    if (!compact)
     {
-        const int x = dBtoX(ticksDb[i]);
-        g.setColour(juce::Colours::black.withAlpha(0.22f));
-        g.drawVerticalLine(x, (float) barTop, (float) (barTop + barH));
+        for (int i = 0; i < 7; ++i)
+        {
+            const int x = dBtoX(ticksDb[i]);
+            g.setColour(juce::Colours::black.withAlpha(0.22f));
+            g.drawVerticalLine(x, (float) barTop, (float) (barTop + barH));
+        }
     }
 
     // ── Bar border ────────────────────────────────────────────────────────────
@@ -339,9 +345,6 @@ namespace
     const juce::String kDown           = juce::String::fromUTF8("\xE2\x96\xBC");   // ▼
     const juce::String kRemove         = juce::String::fromUTF8("\xE2\x9C\x95");   // ✕
     const juce::String kBypass         = juce::String::fromUTF8("\xE2\x8A\x98");   // ⊘
-    const juce::String kSlotActive     = juce::String::fromUTF8("\xE2\x97\x8F");   // ●
-    const juce::String kPresetActive   = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶
-    const juce::String kPresetInactive = juce::String::fromUTF8("\xE2\x97\x8B");   // ○
     const juce::String kEditor         = juce::String::fromUTF8("\xE2\x9A\x99");   // ⚙
     const juce::String kLeft           = juce::String::fromUTF8("\xE2\x97\x80");   // ◀
     const juce::String kRight          = juce::String::fromUTF8("\xE2\x96\xB6");   // ▶ (same glyph, section-move context)
@@ -488,66 +491,65 @@ void SectionHeaderComponent::paint(juce::Graphics& g)
     // Reserve space for volume control + 4 buttons on the right.
     nameArea.removeFromRight(30 + 3 + 26 * 4 + 3 + 2 + 6 + 6);
 
-    // ── Level meter strip (dBFS scale) ────────────────────────────────────────
-    auto meterArea = nameArea.removeFromBottom(10).reduced(0, 1);
-
-    // Bar background.
-    g.setColour(tf::colour::background.withAlpha(0.8f));
-    g.fillRoundedRectangle(meterArea.toFloat(), 2.0f);
-
-    // Three-zone fill (dBFS mapped to bar width).
-    if (displayLevel > 1e-7f)
-    {
-        const float levelNorm   = LevelMeterBar::toNorm(LevelMeterBar::toDB(displayLevel));
-        const float greenThresh = LevelMeterBar::toNorm(-12.0f);
-        const float yellowThresh= LevelMeterBar::toNorm(-6.0f);
-        const int mW = meterArea.getWidth();
-        const int levelX    = meterArea.getX() + juce::roundToInt(levelNorm    * mW);
-        const int greenEndX = meterArea.getX() + juce::roundToInt(greenThresh  * mW);
-        const int yellowEndX= meterArea.getX() + juce::roundToInt(yellowThresh * mW);
-
-        auto fillZone = [&](juce::Colour col, int x1, int x2)
-        {
-            x1 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x1);
-            x2 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x2);
-            if (x2 > x1) { g.setColour(col); g.fillRect(x1, meterArea.getY(), x2 - x1, meterArea.getHeight()); }
-        };
-        fillZone(juce::Colour(0xff22c55e), meterArea.getX(), juce::jmin(levelX, greenEndX));
-        fillZone(juce::Colour(0xfff59e0b), greenEndX,        juce::jmin(levelX, yellowEndX));
-        fillZone(juce::Colour(0xffef4444), yellowEndX,       levelX);
-    }
-
-    // Peak-hold tick.
-    if (peakHold > 1e-7f)
-    {
-        const float holdNorm = LevelMeterBar::toNorm(LevelMeterBar::toDB(peakHold));
-        const int holdX = meterArea.getX() + juce::roundToInt(holdNorm * meterArea.getWidth());
-        const bool isClip = peakHold >= 1.0f;
-        g.setColour(isClip ? tf::colour::danger : juce::Colours::white.withAlpha(0.75f));
-        g.fillRect(holdX - 1, meterArea.getY(), 2, meterArea.getHeight());
-    }
-
-    // Bar border.
-    g.setColour(tf::colour::outline.withAlpha(0.35f));
-    g.drawRoundedRectangle(meterArea.toFloat().reduced(0.5f), 2.0f, 0.6f);
-
-    // ── Section name + peak dB label in remaining nameArea ────────────────────
     g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
 
-    if (peakHold > 1e-7f)
+    if (!horizontalMode)
     {
-        const float peakDb = LevelMeterBar::toDB(peakHold);
-        const bool  isClip = peakHold >= 1.0f;
-        const juce::Colour pkCol = isClip ? tf::colour::danger
-                                 : (peakDb > -6.0f) ? tf::colour::warn
-                                 : tf::colour::textDim;
-        const juce::String pkStr = isClip ? "CLIP"
-                                 : (peakDb >= 0.0f ? "+" : "") + juce::String(peakDb, 1) + " dB";
-        auto peakLabel = nameArea.removeFromRight(50);
-        g.setColour(pkCol);
-        g.setFont(juce::FontOptions(10.0f));
-        g.drawText(pkStr, peakLabel, juce::Justification::centredRight);
-        g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        // ── Level meter strip (dBFS scale) ────────────────────────────────────
+        auto meterArea = nameArea.removeFromBottom(10).reduced(0, 1);
+
+        g.setColour(tf::colour::background.withAlpha(0.8f));
+        g.fillRoundedRectangle(meterArea.toFloat(), 2.0f);
+
+        if (displayLevel > 1e-7f)
+        {
+            const float levelNorm   = LevelMeterBar::toNorm(LevelMeterBar::toDB(displayLevel));
+            const float greenThresh = LevelMeterBar::toNorm(-12.0f);
+            const float yellowThresh= LevelMeterBar::toNorm(-6.0f);
+            const int mW = meterArea.getWidth();
+            const int levelX    = meterArea.getX() + juce::roundToInt(levelNorm    * mW);
+            const int greenEndX = meterArea.getX() + juce::roundToInt(greenThresh  * mW);
+            const int yellowEndX= meterArea.getX() + juce::roundToInt(yellowThresh * mW);
+
+            auto fillZone = [&](juce::Colour col, int x1, int x2)
+            {
+                x1 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x1);
+                x2 = juce::jlimit(meterArea.getX(), meterArea.getRight(), x2);
+                if (x2 > x1) { g.setColour(col); g.fillRect(x1, meterArea.getY(), x2 - x1, meterArea.getHeight()); }
+            };
+            fillZone(juce::Colour(0xff22c55e), meterArea.getX(), juce::jmin(levelX, greenEndX));
+            fillZone(juce::Colour(0xfff59e0b), greenEndX,        juce::jmin(levelX, yellowEndX));
+            fillZone(juce::Colour(0xffef4444), yellowEndX,       levelX);
+        }
+
+        if (peakHold > 1e-7f)
+        {
+            const float holdNorm = LevelMeterBar::toNorm(LevelMeterBar::toDB(peakHold));
+            const int holdX = meterArea.getX() + juce::roundToInt(holdNorm * meterArea.getWidth());
+            const bool isClip = peakHold >= 1.0f;
+            g.setColour(isClip ? tf::colour::danger : juce::Colours::white.withAlpha(0.75f));
+            g.fillRect(holdX - 1, meterArea.getY(), 2, meterArea.getHeight());
+        }
+
+        g.setColour(tf::colour::outline.withAlpha(0.35f));
+        g.drawRoundedRectangle(meterArea.toFloat().reduced(0.5f), 2.0f, 0.6f);
+
+        // Peak dB label.
+        if (peakHold > 1e-7f)
+        {
+            const float peakDb = LevelMeterBar::toDB(peakHold);
+            const bool  isClip = peakHold >= 1.0f;
+            const juce::Colour pkCol = isClip ? tf::colour::danger
+                                     : (peakDb > -6.0f) ? tf::colour::warn
+                                     : tf::colour::textDim;
+            const juce::String pkStr = isClip ? "CLIP"
+                                     : (peakDb >= 0.0f ? "+" : "") + juce::String(peakDb, 1) + " dB";
+            auto peakLabel = nameArea.removeFromRight(50);
+            g.setColour(pkCol);
+            g.setFont(juce::FontOptions(10.0f));
+            g.drawText(pkStr, peakLabel, juce::Justification::centredRight);
+            g.setFont(juce::FontOptions(13.0f, juce::Font::bold));
+        }
     }
 
     g.setColour(tf::colour::text);
@@ -556,6 +558,8 @@ void SectionHeaderComponent::paint(juce::Graphics& g)
 
 void SectionHeaderComponent::timerCallback()
 {
+    if (horizontalMode) return;
+
     if (model.onGetSectionLevel)
     {
         const float raw = model.onGetSectionLevel(sectionId);
@@ -623,18 +627,6 @@ void SectionHeaderComponent::setHorizontalMode(bool horizontal)
 
 ChainSlotComponent::ChainSlotComponent(ChainListModel& ownerModel) : model(ownerModel)
 {
-    auto styleIcon = [this](juce::TextButton& b, const juce::String& text, juce::Colour c)
-    {
-        b.setButtonText(text);
-        b.setColour(juce::TextButton::textColourOffId, c);
-        b.setMouseCursor(juce::MouseCursor::PointingHandCursor);
-        addAndMakeVisible(b);
-    };
-
-    styleIcon(bypassButton, kBypass, tf::colour::text);
-
-    bypassButton.onClick = [this] { if (model.onBypass) model.onBypass(slotIndex); };
-
     volumeControl.onGainChanged = [this](float gain)
     {
         if (model.onSlotGainChanged)
@@ -662,23 +654,6 @@ void ChainSlotComponent::update(int rowIdx, const ChainRow& row, bool sel)
 
     volumeControl.setValue(VolumeControl::fromLinear(info.postGain));
 
-    if (isPreset)
-    {
-        bypassButton.setButtonText(bypassed ? kPresetInactive : kPresetActive);
-        bypassButton.setColour(juce::TextButton::buttonColourId,
-                               bypassed ? juce::Colour{} : tf::colour::accent.withAlpha(0.28f));
-        bypassButton.setColour(juce::TextButton::textColourOffId,
-                               bypassed ? tf::colour::textDim : tf::colour::accent);
-    }
-    else
-    {
-        bypassButton.setButtonText(bypassed ? kBypass : kSlotActive);
-        bypassButton.setColour(juce::TextButton::buttonColourId,
-                               bypassed ? tf::colour::warn.withAlpha(0.28f) : juce::Colour{});
-        bypassButton.setColour(juce::TextButton::textColourOffId,
-                               bypassed ? tf::colour::warn : tf::colour::text);
-    }
-
     repaint();
 }
 
@@ -686,11 +661,15 @@ void ChainSlotComponent::resized()
 {
     auto area = getLocalBounds().reduced(kRightMargin, 5);
 
-    bypassButton.setBounds(area.removeFromRight(kBtnW));  area.removeFromRight(kBtnGap);
     volumeControl.setBounds(area.removeFromRight(kVolW)); area.removeFromRight(kBtnGap);
 
     gripArea = area.removeFromLeft(18);
     textArea = area;
+
+    // Badge rect mirrors the paint layout so mouse hit-testing is accurate.
+    const int bSide = textArea.getHeight() - 4;
+    badgeRect = textArea.toFloat().removeFromLeft(float(bSide + 8))
+                        .withSizeKeepingCentre(float(bSide), float(bSide));
 }
 
 void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
@@ -749,8 +728,14 @@ void ChainSlotComponent::mouseDrag(const juce::MouseEvent& e)
     }
 }
 
-void ChainSlotComponent::mouseUp(const juce::MouseEvent&)
+void ChainSlotComponent::mouseUp(const juce::MouseEvent& e)
 {
+    if (!dragStarted && !e.mods.isRightButtonDown()
+        && badgeRect.contains(e.position.toFloat()))
+    {
+        if (model.onBypass)
+            model.onBypass(slotIndex);
+    }
     dragStarted = false;
 }
 
@@ -758,23 +743,14 @@ void ChainSlotComponent::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
 
-    // Preset rows use a warm amber tint to distinguish them from stomp rows.
     g.setColour(tf::colour::surface2);
     g.fillRoundedRectangle(r, 6.0f);
-    if (isPreset && !selected)
-    {
-        g.setColour(tf::colour::warn.withAlpha(0.10f));
-        g.fillRoundedRectangle(r, 6.0f);
-    }
+
     if (selected)
     {
-        const juce::Colour selFill   = isPreset ? tf::colour::warn.withAlpha(0.20f)
-                                                : tf::colour::accent.withAlpha(0.16f);
-        const juce::Colour selBorder = isPreset ? tf::colour::warn.withAlpha(0.65f)
-                                                : tf::colour::accent.withAlpha(0.70f);
-        g.setColour(selFill);
+        g.setColour(tf::colour::accent.withAlpha(0.16f));
         g.fillRoundedRectangle(r, 6.0f);
-        g.setColour(selBorder);
+        g.setColour(tf::colour::accent.withAlpha(0.70f));
         g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.0f);
     }
 
@@ -811,12 +787,15 @@ void ChainSlotComponent::paint(juce::Graphics& g)
 
         if (!bypassed)
         {
-            const bool isByp = (prefix == "BYP");
-            g.setColour(isByp ? tf::colour::warn.withAlpha(0.22f) : tf::colour::accent.withAlpha(0.22f));
+            // Stomp active: light blue so it reads as "on", not as bypass (amber).
+            // Preset active: keep teal accent.
+            const juce::Colour activeCol = isPreset ? tf::colour::accent
+                                                     : juce::Colour(0xff4a9eff);
+            g.setColour(activeCol.withAlpha(0.22f));
             g.fillRoundedRectangle(badge, 4.0f);
-            g.setColour(isByp ? tf::colour::warn.withAlpha(0.55f) : tf::colour::accent.withAlpha(0.55f));
+            g.setColour(activeCol.withAlpha(0.55f));
             g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
-            g.setColour(isByp ? tf::colour::warn : tf::colour::accent);
+            g.setColour(activeCol);
         }
         else
         {
@@ -830,8 +809,15 @@ void ChainSlotComponent::paint(juce::Graphics& g)
     }
     else
     {
-        g.setColour(tf::colour::outline.withAlpha(0.28f));
-        g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.7f);
+        // Badge acts as the bypass button — reflect state with border colour.
+        const juce::Colour activeCol = isPreset ? tf::colour::accent
+                                                 : juce::Colour(0xff4a9eff);
+        const juce::Colour c = bypassed
+            ? (isPreset ? tf::colour::outline.withAlpha(0.28f)
+                        : tf::colour::warn.withAlpha(0.38f))
+            : activeCol.withAlpha(0.32f);
+        g.setColour(c);
+        g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
     }
 
     a.removeFromLeft(4);

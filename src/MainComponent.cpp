@@ -1,4 +1,5 @@
 ﻿#include "MainComponent.h"
+#include "AppDataDir.h"
 #include "HostDebug.h"
 #include "Preset.h"
 #include <algorithm>
@@ -1575,7 +1576,7 @@ void MainComponent::initialiseSettings()
     juce::PropertiesFile::Options options;
     options.applicationName = "AmpForge";
     options.filenameSuffix = "settings";
-    options.folderName = "AmpForge";
+    options.folderName = AppDataDir::get().getFullPathName();
     options.storageFormat = juce::PropertiesFile::storeAsXML;
 
     appProperties.setStorageParameters(options);

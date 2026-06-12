@@ -1,4 +1,5 @@
 #include "PluginScanner.h"
+#include "AppDataDir.h"
 #include "HostDebug.h"
 #include "ScanSubprocess.h"
 
@@ -148,9 +149,7 @@ void PluginScanner::scanDefaultWindowsVST2Folders()
 
 juce::File PluginScanner::getCacheFile()
 {
-    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-        .getChildFile("AmpForge")
-        .getChildFile("pluginCache.xml");
+    return AppDataDir::get().getChildFile("pluginCache.xml");
 }
 
 bool PluginScanner::isUpToDate(const juce::String& path) const

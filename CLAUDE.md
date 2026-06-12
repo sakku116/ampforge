@@ -234,8 +234,128 @@ v1 files (no SECTION nodes) migrate to a synthetic "Stomp 1" section. `slotId` a
 
 - User pushes manually — never `git push` without explicit ask.
 - Ask before deleting files or branches.
-- Local git only; no CI/CD configured.
-- Current branch: `main`.
+- **`main` is protected on GitHub** — direct push is rejected. All changes must go through a PR.
+- **Never push to `main` directly.** Always PR from `dev` or `feature/*`.
+
+### Branch model
+
+```
+main        (protected — only receives PRs from dev)
+  ↑ PR
+dev         (integration branch — all features merge here first)
+  ↑ PR
+feature/*   (one task/fix per branch, cut from dev)
+fix/*
+```
+
+**Day-to-day work:**
+```bash
+git checkout dev && git pull
+git checkout -b feature/my-feature
+# ... work ...
+git push -u origin feature/my-feature
+gh pr create  # PR: feature/my-feature → dev
+```
+
+**Releasing** — bump version + changelog directly on `dev`, then PR `dev → main` (see Release Workflow below).
+
+---
+
+## Release Workflow
+
+All releases follow this exact sequence. Execute it completely when the user says "release vX.Y.Z" or similar.
+
+### 1. Determine version bump (Semantic Versioning)
+
+| Change | Bump |
+|--------|------|
+| Breaking change or major redesign | MAJOR (`1.0.0 → 2.0.0`) |
+| New feature, backward-compatible | MINOR (`0.1.0 → 0.2.0`) |
+| Bug fix, patch, docs only | PATCH (`0.1.0 → 0.1.1`) |
+
+Version is the **only** source of truth: `project(AmpForge VERSION x.y.z)` in [CMakeLists.txt:2](CMakeLists.txt#L2).
+
+### 2. Prepare release on dev
+
+```bash
+git checkout dev && git pull
+```
+
+Edit **one line** in [CMakeLists.txt:2](CMakeLists.txt#L2):
+```cmake
+project(AmpForge VERSION X.Y.Z LANGUAGES CXX)
+```
+Makefile, app title bar, and installer filename all derive from this automatically.
+
+### 3. Generate CHANGELOG entry
+
+Collect all commits since the last tag:
+```bash
+git log vPREV..HEAD --oneline --no-merges
+```
+Categorise and prepend to [CHANGELOG.md](CHANGELOG.md):
+
+```markdown
+## [X.Y.Z] — YYYY-MM-DD
+
+### Added
+- Short user-facing description (not commit hash prose)
+
+### Fixed
+- ...
+
+### Changed
+- ...
+```
+
+Rules:
+- Use present tense ("Add", "Fix", not "Added", "Fixed") inside bullet text.
+- Only surface user-visible changes; omit pure refactors and CI noise.
+- If [CHANGELOG.md](CHANGELOG.md) doesn't exist yet, create it with a `# Changelog` heading first.
+
+### 4. Commit & PR dev → main
+
+```bash
+git add CMakeLists.txt CHANGELOG.md
+git commit -m "chore: release vX.Y.Z"
+git push origin dev
+gh pr create --base main --title "Release vX.Y.Z" --body "$(cat <<'EOF'
+## Release vX.Y.Z
+
+See CHANGELOG.md for details.
+
+Checklist:
+- [ ] Version bumped in CMakeLists.txt
+- [ ] CHANGELOG.md updated
+- [ ] `make portable` passes
+EOF
+)"
+```
+
+**Never merge the PR yourself** — wait for user confirmation.
+
+### 5. Tag & build artifacts (after PR is merged to main)
+
+```bash
+git checkout main && git pull
+git tag vX.Y.Z -m "Release vX.Y.Z"
+git push origin vX.Y.Z
+git checkout dev && git merge main  # keep dev in sync
+git push origin dev
+make portable      # → dist/AmpForge-X.Y.Z-portable-x64.zip
+# make installer  # → dist/AmpForge-Setup-X.Y.Z-x64.exe (requires Inno Setup 6)
+```
+
+Upload `dist/AmpForge-X.Y.Z-portable-x64.zip` (and installer if built) to the GitHub Release for tag `vX.Y.Z`.
+
+### Quick reference
+
+```
+Latest tag:       git describe --tags --abbrev=0
+Commits since:    git log vPREV..HEAD --oneline --no-merges
+Current version:  grep -m1 'VERSION [0-9]' CMakeLists.txt
+Build portable:   make portable
+```
 
 ---
 

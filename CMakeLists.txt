@@ -29,6 +29,7 @@ juce_generate_juce_header(AmpForge)
 target_sources(AmpForge
     PRIVATE
         src/main.cpp
+        src/AppDataDir.h
         src/AudioEngine.h
         src/AudioEngine.cpp
         src/PluginScanner.h
@@ -195,6 +196,7 @@ target_compile_definitions(AmpForge
         JUCE_PLUGINHOST_VST3=1
         JUCE_PLUGINHOST_VST=${_juce_vst2_flag}
         JUCE_ASIO=${_juce_asio_flag}
+        AMPFORGE_VERSION="${PROJECT_VERSION}"
 )
 
 target_link_libraries(AmpForge

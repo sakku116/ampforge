@@ -6,6 +6,23 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-06-12
+
+### Added
+- Badge box (left of plugin name) is now the bypass / activate toggle — no separate button needed. Shows the bound key or CC label when a control is assigned.
+- `LevelMeterBar` compact mode — master input/output meters now render as a thin 8 px strip aligned below each slider.
+
+### Changed
+- Active stomp slot badge color changed from amber to light blue so it is no longer confused with the bypass (amber) state.
+- Preset section slot rows now use the same background as stomp rows — section type is distinguished by the header badge, not row color.
+- Peak meter in the section header is hidden in horizontal chain view (vertical view only).
+- Footer panel compacted: row height 34 → 28 px, total footer height 175 → 128 px. Meter strip merged into the master area.
+- In Gain and Out Vol reset buttons removed; double-click either slider to reset to unity.
+- Thin separator lines added between footer sections (Templates / Master / Control) for visual clarity.
+- User Guide rewritten in English with expanded Stomp vs Preset section explanations and examples.
+
+---
+
 ## [0.1.0] — 2026-06-12
 
 ### Added

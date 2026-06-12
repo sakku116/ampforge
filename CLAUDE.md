@@ -158,8 +158,12 @@ struct ControlTrigger {
 | Duplicate plugin | Right-click → Duplicate on slot row; `PluginChain::duplicatePlugin`, `PluginHost::duplicatePlugin`, `ChainListModel::onDuplicate`, `MainComponent::duplicateSlotAt` |
 | Slot right-click context menu | Open Editor, Duplicate, Learn Control, Rename, Reset Name, Remove — all via right-click only (no dedicated row buttons for editor/remove) |
 | Section remove confirmation | Right-click → Remove Section triggers `juce::AlertWindow` confirmation before `removeSection`; no ✕ button on section header |
-| Control binding badge | Square badge left of plugin name (side = rowHeight−4 ≈ 32px); shows assigned CC/note/key label; amber fill for BYP bindings, teal for ACT; dimmed border+text when slot bypassed; empty outline when unassigned |
-| Preset row tint | Preset section slot rows have amber overlay (`warn` @ 10% alpha); selected preset row uses amber highlight |
+| Badge-as-bypass button | Badge box (left of plugin name) is the bypass/activate toggle — click to toggle (stomp) or activate (preset). No separate bypass TextButton. `badgeRect` stored in `ChainSlotComponent`, hit-tested in `mouseUp()` |
+| Badge color semantics | Active stomp: light blue `#4a9eff`; bypassed stomp: amber `warn`; preset active: teal `accent`; preset inactive: dim outline. Badge shows key/CC label when control assigned |
+| Preset row appearance | Preset rows use same `surface2` background as stomp rows (no amber tint). Section header still uses amber accent bar + PRESET badge to distinguish |
+| Horizontal view peak meter | `SectionHeaderComponent::paint()` and `timerCallback()` skip meter rendering when `horizontalMode == true` — meter only visible in vertical view |
+| `LevelMeterBar` compact mode | `compact = true` skips 13px label row so bar renders at small heights. Used by `masterInputMeter` / `masterOutputMeter` (8px strip in footer) |
+| Footer compact layout | Footer `rowH = 28px`, `footerH = 128px`. Meter strip merged into master area (no separate row). Thin separator lines between sections drawn in `paint()` using `footerSep1Y`/`footerSep2Y`. Reset buttons removed; `setDoubleClickReturnValue(true, 1.0)` on gain sliders |
 
 ---
 
@@ -361,6 +365,6 @@ Build portable:   make portable
 
 ## Recently Completed Work (last 3 sessions)
 
-1. **Horizontal chain view:** `ChainHorizontalView` + `SectionColumnComponent` in `ChainListBox.h/.cpp`. Toggle button (↔/↕) switches vertical ↔ horizontal mode. Sections rendered as side-by-side columns (240px wide, 8px gap) in a `juce::Viewport` with horizontal scrollbar. Section headers show ◀▶ instead of ▲▼. Slot DnD works cross-column. Persisted as `chainViewMode`.
-2. **Signal chain UX polish:** Duplicate plugin via right-click (`PluginChain::duplicatePlugin`). Open Editor + Remove moved to right-click menu only — no dedicated row buttons. Section ✕ button removed; Remove Section via right-click shows `juce::AlertWindow` confirmation. Shared layout constants (`kBtnW=28`, `kVolW=30`, `kBtnGap=4`, `kRightMargin=4`) align buttons across section headers and slot rows.
-3. **Visual refinements:** Control binding badge — square (side ≈ rowHeight−4), 11pt bold font, amber/teal fill by action type, dimmed when slot bypassed. Preset slot rows have amber tint (`warn` @ 10% alpha). Uniform row height 46px (was 52px). Library and Signal Chain panel header rows vertically aligned.
+1. **Badge-as-bypass button:** Removed `bypassButton` TextButton from `ChainSlotComponent`. The control-binding badge box is now the bypass/activate toggle. `badgeRect` (stored as member, computed in `resized()`) is hit-tested in `mouseUp()`. Click triggers `model.onBypass(slotIndex)` — same stomp/preset behavior as before.
+2. **Chain slot visual polish:** Active stomp slots now show light blue badge (`#4a9eff`) instead of amber to avoid confusion with bypass state. Preset rows use same `surface2` background as stomp rows (no amber tint). Horizontal view hides the section peak meter (`SectionHeaderComponent::timerCallback()` and `paint()` both guard on `horizontalMode`).
+3. **Compact footer:** `rowH` 34→28px, `footerH` 175→128px. Meter strip merged into master area (8px strip, no separate row). `LevelMeterBar::compact = true` on master meters skips 13px label overhead so meters render at small height. Reset buttons (↺) removed; `setDoubleClickReturnValue(true, 1.0)` on both gain sliders. Thin 1px separator lines between footer sections drawn via `footerSep1Y`/`footerSep2Y` in `paint()`.

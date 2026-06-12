@@ -1,10 +1,10 @@
-# Amp Forge — Panduan Pengguna
+# Amp Forge — User Guide
 
-Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/VST2. Berjalan di Windows.
+Amp Forge is a real-time desktop VST3/VST2 plugin host for guitar processing. Windows only.
 
 ---
 
-## Tampilan Utama
+## Main Window
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -13,8 +13,8 @@ Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/
 │  LIBRARY                 │  SIGNAL CHAIN          [Save][Load]│
 │                          │  ┌─────────────────────────────┐  │
 │  Distortion XY    VST3   │  │ ■ Stomp 1    [⊘][↑][↓][🔊] │  │
-│  Reverb ABC       VST3   │  │  [□] Distortion XY    [🔊]  │  │
-│  Chorus ZZZ       VST3   │  │  [■] Reverb ABC       [🔊]  │  │
+│  Reverb ABC       VST3   │  │  [■] Distortion XY    [🔊]  │  │
+│  Chorus ZZZ       VST3   │  │  [□] Reverb ABC       [🔊]  │  │
 │  ...                     │  ├─────────────────────────────┤  │
 │                          │  │ ■ Presets    [⊘][↑][↓][🔊] │  │
 │  [+ Add to Chain]        │  │  [□] Lead             [🔊]  │  │
@@ -29,184 +29,209 @@ Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/
 │  CONTROL: [status]  [Learn Expression]  [Clear Maps]         │
 └──────────────────────────────────────────────────────────────┘
 ```
-*[■] = badge box aktif (biru untuk stomp, teal untuk preset aktif)*
-*[□] = badge box tidak aktif / bypassed*
+*`[■]` = active badge (blue for stomp, teal for active preset)*  
+*`[□]` = inactive / bypassed badge*
 
 ---
 
-## Library (Panel Kiri)
+## Library (Left Panel)
 
-Daftar semua plugin VST3/VST2 yang terdeteksi di komputer.
+Lists all VST3/VST2 plugins detected on your system.
 
-- **Rescan Plugins** — scan ulang folder default dan folder kustom. Aman dipakai kapan saja; setiap plugin discan di proses terpisah agar plugin rusak tidak mematikan aplikasi.
-- **Scan Paths...** — tambah / hapus folder kustom yang ikut discan (selain folder Windows default).
-- **+ Add to Chain** — tambah plugin yang dipilih ke signal chain (atau double-click nama plugin).
+- **Rescan Plugins** — re-scans default and custom folders. Each plugin is scanned in an isolated subprocess so a faulty plugin cannot crash the host.
+- **Scan Paths...** — add or remove custom scan folders (in addition to Windows defaults).
+- **+ Add to Chain** — add the selected plugin to the signal chain, or double-click a plugin name.
 
-Folder default yang discan:
+Default scan folders:
 - `C:\Program Files\Common Files\VST3`
 - `C:\Program Files (x86)\Common Files\VST3`
 
 ---
 
-## Signal Chain (Panel Kanan)
+## Signal Chain (Right Panel)
 
-Urutan pemrosesan audio: Input → Slot 0 → Slot 1 → ... → Output.
+Audio flows top to bottom (or left to right in horizontal view):  
+**Input → Slot 0 → Slot 1 → … → Output**
+
+Plugins are grouped into **sections**. The section type controls how the bypass / activate badge on each slot behaves.
+
+### Section Types
+
+#### Stomp Section
+
+Every plugin toggles bypass independently — just like stomping individual pedals on a physical pedalboard.
+
+```
+┌────────────┐  ┌────────────┐  ┌────────────┐
+│ Compressor │  │ Overdrive  │  │   Reverb   │
+│   [■ ON]   │  │  [□ BYP]   │  │   [■ ON]   │
+└────────────┘  └────────────┘  └────────────┘
+```
+
+Clicking the Overdrive badge turns it on without touching the others. Every slot is fully independent.
+
+#### Preset Section
+
+Only **one** plugin is active at a time. Selecting a slot automatically deactivates every other slot in the same section. Ideal for amp simulators or multi-FX rigs where you want exactly one tone loaded at a time.
+
+```
+┌────────────┐  ┌────────────┐  ┌────────────┐
+│ Amp Clean  │  │ Amp Crunch │  │  Amp Lead  │
+│  [■ ACT]   │  │  [□ SEL]   │  │  [□ SEL]   │
+└────────────┘  └────────────┘  └────────────┘
+                      ↑
+            click to switch here — Clean and Lead mute automatically
+```
+
+There is always exactly one active slot in a preset section; you cannot deactivate all of them simultaneously.
 
 ### Section Header
 
-Setiap bagian signal chain memiliki header dengan nama section dan tombol kontrol:
+Each section has a header row with control buttons:
 
-| Tombol | Fungsi |
-|--------|--------|
-| `⊘` | Bypass section — matikan semua plugin dalam section ini sekaligus |
-| `↑` / `↓` | Pindah urutan section ke atas / bawah |
-| `×` | Hapus section beserta semua plugin di dalamnya |
+| Button | Function |
+|--------|----------|
+| `⊘` | Bypass the entire section — mutes all plugins in it at once |
+| `↑` / `↓` | Move this section up or down in the chain |
+| `🔊` | Section output volume |
 
-Nama section bisa diganti: **klik kanan** header → **Rename**.
+**Right-click** a section header to **Rename** or **Remove** it (removal asks for confirmation).
 
-### Tipe Section
+### Plugin Slot Row
 
-**Stomp** — Setiap plugin punya toggle bypass (`B`) independen. Mirip stompbox di pedalboard fisik.
+| Element | Function |
+|---------|----------|
+| **Badge box** (left of name) | **Click** to toggle bypass (Stomp) or activate the slot (Preset). Blue = active stomp, teal = active preset, amber/dim = bypassed. Shows the bound key or CC label when a control is assigned |
+| Plugin name | Display name and format (VST3 / VST2) |
+| `🔊` Volume knob | Per-slot post-gain |
+| Drag grip | Drag to reorder or move the slot into a different section |
 
-**Preset** — Hanya satu plugin aktif pada satu waktu (radio/exclusive). Berguna untuk amp sim atau multi-FX yang saling eksklusif. Plugin aktif ditandai `●`, yang lain `○`. Klik `●`/`○` untuk switch.
+**Right-click** a plugin row for more options:
 
-### Slot Plugin (Baris Plugin)
+| Option | Function |
+|--------|----------|
+| **Open Editor** | Open the plugin's own UI window |
+| **Duplicate** | Clone this slot (copies plugin state) |
+| **Learn Control** | Bind a keyboard key or MIDI event to this slot |
+| **Rename** / **Reset Name** | Set or clear a custom display name |
+| **Remove** | Delete the plugin from the chain |
 
-| Elemen | Fungsi |
-|--------|--------|
-| **Badge box** (kiri nama) | **Klik** untuk toggle bypass (Stomp) atau aktifkan slot (Preset). Biru = slot ON, amber/dim = bypassed. Jika ada binding, badge menampilkan label key/CC terikat |
-| Nama plugin | Teks nama plugin + format di bawahnya |
-| Volume knob | Atur post-gain per slot |
-| Drag grip | Seret baris untuk mengubah urutan atau pindah section |
+### Moving Slots Across Sections
 
-**Klik kanan** pada baris plugin untuk opsi tambahan:
-- **Open Editor** — buka UI plugin
-- **Duplicate** — duplikat slot ini
-- **Learn Control** — ikat key keyboard atau MIDI CC/note ke slot ini
-- **Rename** / **Reset Name** — beri atau hapus nama kustom
-- **Remove** — hapus plugin dari chain
+Drag a slot from one section and drop it into another. The slot automatically takes on the behavior of its destination section — a plugin dropped into a Preset section joins that section's exclusive group.
 
-### Menambah / Menghapus Section
+### Adding and Removing Sections
 
-- **+ Stomp** — tambah section bertipe Stomp baru di bawah
-- **+ Preset** — tambah section bertipe Preset baru di bawah
-
----
-
-## Master Controls (Footer, baris ke-2)
-
-| Kontrol | Fungsi |
-|---------|--------|
-| **In Gain** slider | Gain input sebelum masuk plugin chain (0–200%). Double-click untuk reset ke unity (1.0) |
-| **Out Vol** slider | Volume output setelah plugin chain. Double-click untuk reset ke unity (1.0) |
-| **MUTE** | Matikan output audio sepenuhnya (input tetap jalan) |
-| **In Ch** | Pilih channel input audio |
-| Peak meter | Bar level tipis di bawah masing-masing slider menunjukkan level sinyal real-time |
+- **+ Stomp** — add a new Stomp section at the bottom of the chain
+- **+ Preset** — add a new Preset section at the bottom of the chain
 
 ---
 
-## Preset (Save / Load)
+## Master Controls
 
-Menyimpan dan memuat snapshot seluruh signal chain ke file `.tfpreset`.
+Located in the footer.
 
-- **Save** — simpan chain saat ini (pilih lokasi file)
-- **Load** — muat file `.tfpreset` yang sudah ada
+| Control | Function |
+|---------|----------|
+| **In Gain** slider | Input gain before the plugin chain (0–200%). Double-click to reset to unity |
+| **Out Vol** slider | Output volume after the plugin chain (0–200%). Double-click to reset to unity |
+| **MUTE** | Silence the output (signal still flows through the chain) |
+| **In Ch** | Select the audio input channel |
+| Peak meters | Thin level bars below each slider showing real-time signal level |
 
-File preset menyimpan: daftar section, urutan plugin, state setiap plugin, status bypass, dan binding kontrol (slotId stabil — binding tidak rusak meski urutan section diubah).
+---
 
-Default folder preset: `%APPDATA%\AmpForge\presets\`
+## Preset — Save & Load
+
+Saves and loads a complete snapshot of the signal chain to a `.tfpreset` file.
+
+- **Save** — save the current chain (choose a file location)
+- **Load** — load an existing `.tfpreset` file
+
+A preset stores all sections and their order, every plugin, plugin state, bypass status, and control bindings. Bindings survive section reordering because they track stable slot IDs, not positional indexes.
+
+Default preset folder: `%APPDATA%\AmpForge\presets\`
 
 ---
 
 ## Templates
 
-Template adalah snapshot bernama dari seluruh signal chain. Berbeda dari preset file: template disimpan di dalam aplikasi (tidak perlu pilih file saat recall), cocok untuk quick-switch antar setup.
+A template is a named snapshot of the signal chain stored inside the app — no file dialog is needed when recalling. Useful for quick-switching between setups during a session.
 
-| Kontrol | Fungsi |
-|---------|--------|
-| Dropdown | Pilih template aktif |
-| `◀` / `▶` | Pindah ke template sebelumnya / berikutnya |
-| `⊕` | Simpan chain saat ini sebagai template baru |
-| `↑` | Update template aktif dengan chain saat ini |
-| `✎` | Rename template aktif |
-| `✕` | Hapus template aktif |
-| `●` (indicator) | Chain saat ini berbeda dari template yang tersimpan |
+| Control | Function |
+|---------|----------|
+| Dropdown | Select the active template |
+| `◀` / `▶` | Step to the previous / next template |
+| `⊕` | Save the current chain as a new template |
+| `↑` | Update the active template with the current chain |
+| `✎` | Rename the active template |
+| `✕` | Delete the active template |
+| `●` indicator | The current chain differs from the stored template |
 
 ---
 
 ## Control Mapping
 
-Ikat key keyboard atau MIDI (note/CC/program) ke aksi tertentu.
+Bind keyboard keys or MIDI (note / CC / program change) to specific slot actions.
 
-### Cara Belajar Binding (Learn)
+### Learning a Binding
 
-1. **Klik kanan** pada baris plugin di signal chain
-2. Pilih **Learn Control**
-3. Status bar CONTROL menampilkan "Waiting for input..."
-4. Tekan tombol keyboard, injak footswitch MIDI, atau gerakkan MIDI CC
-5. Binding tersimpan otomatis
+1. **Right-click** a plugin row in the signal chain
+2. Select **Learn Control**
+3. The CONTROL status bar shows *"Waiting for input…"*
+4. Press a keyboard key, stomp a MIDI footswitch, or move a MIDI CC
+5. The binding saves automatically
 
-Aksi yang akan terikat tergantung tipe section:
-- **Stomp section** → toggle bypass plugin tersebut
-- **Preset section** → aktifkan / switch ke slot tersebut
+The bound action depends on the section type:
+- **Stomp section** → toggle bypass for that slot
+- **Preset section** → exclusively activate that slot
 
-Setelah binding tersimpan, label kecil (contoh: `Key Q`, `CC 64`) muncul di baris plugin.
+After learning, a small label (e.g. `Key Q`, `CC 64`) appears on the plugin row's badge.
 
-### Bindings lainnya
-
-Aksi lain (next template, prev template, load template) bisa dikonfigurasi melalui sistem yang sama tapi belum punya UI khusus — dikontrol lewat kode atau masa depan.
+Bindings use stable slot IDs — reordering sections or moving plugins does **not** break existing bindings.
 
 ### Expression Pedal
 
-- Klik **Learn Expression** → pilih slot dan parameter di editor plugin → gerakkan pedal MIDI CC → terikat.
-- Pedal CC langsung mengontrol parameter plugin 0–100%.
+Click **Learn Expression** → select a slot and a parameter in the plugin editor → move the MIDI CC pedal → the mapping saves. The pedal then controls that parameter continuously over its full range.
 
-### Clear Maps
+### Clearing All Bindings
 
-Klik **Clear Maps** — hapus semua binding sekaligus. Label binding di baris plugin langsung hilang.
-
-> **Catatan:** Binding menggunakan `slotId` stabil, bukan posisi. Mengubah urutan section atau memindah plugin tidak merusak binding yang sudah ada.
+Click **Clear Maps** to delete every binding at once. All badge labels disappear immediately.
 
 ---
 
 ## Audio Settings
 
-Klik **Audio Settings** di header untuk:
-- Pilih driver audio (WASAPI / DirectSound / ASIO jika SDK tersedia)
-- Pilih device input dan output
-- Atur sample rate dan buffer size
+Click **Audio Settings** in the header to:
+- Choose an audio driver (WASAPI / DirectSound / ASIO if the SDK is present)
+- Select input and output devices
+- Set sample rate and buffer size
 
-State audio device disimpan otomatis.
+Audio device state is saved automatically on exit.
 
 ---
 
 ## Troubleshooting
 
-| Gejala | Solusi |
-|--------|--------|
-| Plugin tidak muncul di library | Klik **Rescan Plugins**; pastikan path folder sudah benar di **Scan Paths** |
-| Plugin muncul tapi tidak jalan | Cek log di `%APPDATA%\AmpForge\host.log` |
-| "Couldn't open input device" | Sambungkan audio interface; atau buka Audio Settings dan pilih device yang ada |
-| Tidak ada suara | Cek MUTE, In Gain, Out Vol; cek bypass section/slot; cek Audio Settings |
-| Binding kontrol rusak setelah load preset lama | Re-learn binding satu kali (file lama tidak menyimpan slotId) |
-| VST2 tidak terdeteksi | Butuh Steinberg VST2 SDK ditempatkan di `vst2sdk/` lalu rebuild |
+| Symptom | Solution |
+|---------|---------|
+| Plugin not appearing in the library | Click **Rescan Plugins**; verify folder paths in **Scan Paths** |
+| Plugin appears but produces no sound | Check `%APPDATA%\AmpForge\host.log` for errors |
+| "Couldn't open input device" | Connect your audio interface, then open **Audio Settings** and select an available device |
+| No audio output | Check MUTE, In Gain, Out Vol; check section / slot bypass state; check **Audio Settings** |
+| Control bindings lost after loading an old preset | Re-learn bindings once — old preset files did not store slot IDs |
+| VST2 plugins not detected | Requires the Steinberg VST2 SDK placed at `vst2sdk/` in the project root, then rebuild |
 
-**Log file:** `%APPDATA%\AmpForge\host.log` — semua pesan dengan prefix `[AmpForge]`.
-
----
-
-## Shortcut Keyboard
-
-Binding keyboard dikonfigurasi via **Learn Control** (lihat bagian Control Mapping). Tidak ada shortcut global bawaan kecuali yang sudah di-learn.
+**Log file:** `%APPDATA%\AmpForge\host.log` — all messages are prefixed with `[AmpForge]`.
 
 ---
 
-## Lokasi File Penting
+## File Locations
 
-| File | Lokasi |
-|------|--------|
+| File | Path |
+|------|------|
 | Log | `%APPDATA%\AmpForge\host.log` |
-| Preset | `%APPDATA%\AmpForge\presets\*.tfpreset` |
-| Settings (device, templates, maps) | `%APPDATA%\AmpForge\` (ApplicationProperties) |
-| Executable host | `build/AmpForge_artefacts/Debug/Amp Forge.exe` |
+| Presets | `%APPDATA%\AmpForge\presets\*.tfpreset` |
+| Settings (device, templates, maps) | `%APPDATA%\AmpForge\` |
+| Host executable | `build/AmpForge_artefacts/Debug/Amp Forge.exe` |
 | Scan worker | `build/AmpForge_artefacts/Debug/AmpForgeScanWorker.exe` |

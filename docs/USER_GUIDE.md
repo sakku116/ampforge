@@ -10,25 +10,27 @@ Aplikasi desktop untuk memproses gitar secara real-time menggunakan plugin VST3/
 ┌──────────────────────────────────────────────────────────────┐
 │ [Audio Settings]  [Rescan Plugins]  [Scan Paths...]  CPU/DSP │
 ├──────────────────────────┬───────────────────────────────────┤
-│  LIBRARY                 │  SIGNAL CHAIN                     │
+│  LIBRARY                 │  SIGNAL CHAIN          [Save][Load]│
 │                          │  ┌─────────────────────────────┐  │
-│  Distortion XY    VST3   │  │ ▼ Stomp 1         [⊘] [↑↓×] │  │
-│  Reverb ABC       VST3   │  │   Distortion XY  [B]  [×]   │  │
-│  Chorus ZZZ       VST3   │  │   Reverb ABC     [B]  [×]   │  │
+│  Distortion XY    VST3   │  │ ■ Stomp 1    [⊘][↑][↓][🔊] │  │
+│  Reverb ABC       VST3   │  │  [□] Distortion XY    [🔊]  │  │
+│  Chorus ZZZ       VST3   │  │  [■] Reverb ABC       [🔊]  │  │
 │  ...                     │  ├─────────────────────────────┤  │
-│                          │  │ ▼ Presets         [⊘] [↑↓×] │  │
-│  [+ Add to Chain]        │  │   ○ Lead          [×]        │  │
-│                          │  │   ● Crunch        [×]        │  │
-│                          │  │   ○ Clean         [×]        │  │
+│                          │  │ ■ Presets    [⊘][↑][↓][🔊] │  │
+│  [+ Add to Chain]        │  │  [□] Lead             [🔊]  │  │
+│                          │  │  [■] Crunch           [🔊]  │  │
+│                          │  │  [□] Clean            [🔊]  │  │
 │                          │  └─────────────────────────────┘  │
 │                          │  [+ Stomp]  [+ Preset]            │
 ├──────────────────────────┴───────────────────────────────────┤
-│  [Save]  [Load]                                              │
-│  TEMPLATES: [Dropdown ▼] [◀] [▶] [⊕] [↑] [✎] [✕]  ●       │
-│  MASTER:  In Gain [━━━━━━] Out Vol [━━━━━━] [MUTE]          │
+│  TEMPLATES: [Dropdown ▼] [◀] [▶] [⊕] [↑] [✎] [✕]  ●        │
+│  MASTER:  In Gain [━━━━━━] Out Vol [━━━━━━] [MUTE] [In Ch ▼]│
+│           [▬▬▬▬▬▬▬▬▬▬] [▬▬▬▬▬▬▬▬▬▬]  ← peak meters         │
 │  CONTROL: [status]  [Learn Expression]  [Clear Maps]         │
 └──────────────────────────────────────────────────────────────┘
 ```
+*[■] = badge box aktif (biru untuk stomp, teal untuk preset aktif)*
+*[□] = badge box tidak aktif / bypassed*
 
 ---
 
@@ -72,17 +74,17 @@ Nama section bisa diganti: **klik kanan** header → **Rename**.
 
 | Elemen | Fungsi |
 |--------|--------|
-| Nama plugin | Klik untuk membuka editor UI plugin |
-| `B` (Stomp) | Toggle bypass plugin ini |
-| `●`/`○` (Preset) | Aktifkan slot ini (matikan slot lain di section yang sama) |
-| Label binding | Menampilkan key/CC yang terikat (contoh: `Key 1`, `CC 7`) |
-| `×` | Hapus plugin dari chain |
-| Drag | Seret baris untuk mengubah urutan atau pindah section |
+| **Badge box** (kiri nama) | **Klik** untuk toggle bypass (Stomp) atau aktifkan slot (Preset). Biru = slot ON, amber/dim = bypassed. Jika ada binding, badge menampilkan label key/CC terikat |
+| Nama plugin | Teks nama plugin + format di bawahnya |
+| Volume knob | Atur post-gain per slot |
+| Drag grip | Seret baris untuk mengubah urutan atau pindah section |
 
 **Klik kanan** pada baris plugin untuk opsi tambahan:
-- **Learn Control** — ikat key keyboard atau MIDI CC/note ke slot ini
-- **Rename** — beri nama kustom pada slot
 - **Open Editor** — buka UI plugin
+- **Duplicate** — duplikat slot ini
+- **Learn Control** — ikat key keyboard atau MIDI CC/note ke slot ini
+- **Rename** / **Reset Name** — beri atau hapus nama kustom
+- **Remove** — hapus plugin dari chain
 
 ### Menambah / Menghapus Section
 
@@ -91,13 +93,15 @@ Nama section bisa diganti: **klik kanan** header → **Rename**.
 
 ---
 
-## Master Controls (Footer, baris ke-3)
+## Master Controls (Footer, baris ke-2)
 
 | Kontrol | Fungsi |
 |---------|--------|
-| **In Gain** slider | Gain input sebelum masuk plugin chain (0–200%) |
-| **Out Vol** slider | Volume output setelah plugin chain |
+| **In Gain** slider | Gain input sebelum masuk plugin chain (0–200%). Double-click untuk reset ke unity (1.0) |
+| **Out Vol** slider | Volume output setelah plugin chain. Double-click untuk reset ke unity (1.0) |
 | **MUTE** | Matikan output audio sepenuhnya (input tetap jalan) |
+| **In Ch** | Pilih channel input audio |
+| Peak meter | Bar level tipis di bawah masing-masing slider menunjukkan level sinyal real-time |
 
 ---
 

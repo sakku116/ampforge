@@ -181,9 +181,10 @@ MainComponent::refreshChainList()
 ### Mengaktifkan Preset Slot
 
 ```
-User klik "SEL" pada slot di Preset section
+User klik badge box pada slot di Preset section
                     ↓
-ChainSlotComponent::bypassButton.onClick
+ChainSlotComponent::mouseUp()
+    → cek posisi klik di dalam badgeRect
     → model.onBypass(slotIndex)
                     ↓
 MainComponent::toggleBypassAt(slotIndex)

@@ -160,10 +160,11 @@ private:
     void prepareSlot(Slot& slot);
     std::shared_ptr<SlotList> buildList(const juce::Array<SlotSpec>& specs, bool& allOk);
 
-    std::shared_ptr<SlotList> currentList() const { return activeList.load(); }
-    // During a crossfade, returns the incoming (target) list — used by UI queries so the
-    // display reflects the intended new chain immediately rather than waiting ~25 ms for the
-    // audio thread to promote fadeInList to activeList.
+    // Returns the chain that should be the target of all message-thread edits.
+    // During a crossfade this is fadeInList (the incoming template), not activeList
+    // (still playing on the audio thread), so edits work immediately after a template
+    // switch even before the 25ms fade completes.
+    std::shared_ptr<SlotList> currentList() const { return displayList(); }
     std::shared_ptr<SlotList> displayList() const;
     void publish(std::shared_ptr<SlotList> next);                          // call under editLock
     void publishWithCrossfade(std::shared_ptr<SlotList> next, int ms);     // call under editLock

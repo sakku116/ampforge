@@ -357,7 +357,7 @@ namespace
 }
 
 // ── Model: refreshComponentForRow ─────────────────────────────────────────────
-juce::Component* ChainListModel::refreshComponentForRow(int row, bool isRowSelected,
+juce::Component* ChainListModel::refreshComponentForRow(int row, bool /*isRowSelected*/,
                                                         juce::Component* existing)
 {
     if (! juce::isPositiveAndBelow(row, rows.size()))
@@ -367,19 +367,20 @@ juce::Component* ChainListModel::refreshComponentForRow(int row, bool isRowSelec
     }
 
     const auto& rowData = rows.getReference(row);
+    const bool isSelected = (row == highlightedRow);
 
     if (rowData.kind == ChainRow::Kind::sectionHeader)
     {
         auto* comp = dynamic_cast<SectionHeaderComponent*>(existing);
         if (comp == nullptr) { delete existing; comp = new SectionHeaderComponent(*this); }
-        comp->update(row, rowData, isRowSelected);
+        comp->update(row, rowData, isSelected);
         return comp;
     }
     else
     {
         auto* comp = dynamic_cast<ChainSlotComponent*>(existing);
         if (comp == nullptr) { delete existing; comp = new ChainSlotComponent(*this); }
-        comp->update(row, rowData, isRowSelected);
+        comp->update(row, rowData, isSelected);
         return comp;
     }
 }
@@ -454,14 +455,15 @@ void SectionHeaderComponent::resized()
 void SectionHeaderComponent::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced(1.0f, 1.0f);
+    const bool isSelected = (model.highlightedRow == rowIndex);
 
-    g.setColour(selected ? tf::colour::accent.withAlpha(0.18f) : tf::colour::surface3);
+    g.setColour(isSelected ? tf::colour::accent.withAlpha(0.13f) : tf::colour::surface3);
     g.fillRoundedRectangle(r, 5.0f);
 
-    if (selected)
+    if (isSelected)
     {
-        g.setColour(tf::colour::accent.withAlpha(0.6f));
-        g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.0f);
+        g.setColour(tf::colour::accent.withAlpha(0.75f));
+        g.drawRoundedRectangle(r.reduced(0.5f), 5.0f, 1.5f);
     }
 
     // Left accent bar.
@@ -674,17 +676,25 @@ void ChainSlotComponent::resized()
 
 void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
 {
-    if (model.onSelect)
-        model.onSelect(rowIndex);   // rowIndex for visual ListBox selection
+    if (!e.mods.isRightButtonDown() && badgeRect.contains(e.position.toFloat()))
+    {
+        if (model.onBypass) model.onBypass(slotIndex);
+        return;
+    }
+
+    if (!e.mods.isRightButtonDown())
+        if (model.onSelect) model.onSelect(rowIndex);
 
     if (e.mods.isRightButtonDown())
     {
+        const bool hasControl = controlHint.isNotEmpty();
+
         juce::PopupMenu menu;
         menu.addItem(5, "Open Editor");
         menu.addSeparator();
         menu.addItem(4, "Duplicate");
         menu.addSeparator();
-        menu.addItem(1, "Learn Control");
+        menu.addItem(1, hasControl ? "Remove Control" : "Learn Control");
         menu.addSeparator();
         menu.addItem(2, "Rename");
         if (hasCustomName)
@@ -693,10 +703,13 @@ void ChainSlotComponent::mouseDown(const juce::MouseEvent& e)
         menu.addItem(6, "Remove");
 
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
-            [this](int result)
+            [this, hasControl](int result)
             {
-                if (result == 1 && model.onLearnControl)
-                    model.onLearnControl(slotIndex);
+                if (result == 1)
+                {
+                    if (hasControl) { if (model.onRemoveControl) model.onRemoveControl(slotIndex); }
+                    else            { if (model.onLearnControl)  model.onLearnControl(slotIndex);  }
+                }
                 else if (result == 2 && model.onRename)
                     model.onRename(slotIndex);
                 else if (result == 3 && model.onResetName)
@@ -728,30 +741,45 @@ void ChainSlotComponent::mouseDrag(const juce::MouseEvent& e)
     }
 }
 
-void ChainSlotComponent::mouseUp(const juce::MouseEvent& e)
+void ChainSlotComponent::mouseUp(const juce::MouseEvent&)
 {
-    if (!dragStarted && !e.mods.isRightButtonDown()
-        && badgeRect.contains(e.position.toFloat()))
-    {
-        if (model.onBypass)
-            model.onBypass(slotIndex);
-    }
     dragStarted = false;
+}
+
+void ChainSlotComponent::mouseMove(const juce::MouseEvent& e)
+{
+    const bool over = badgeRect.contains(e.position.toFloat());
+    if (over != badgeHovered)
+    {
+        badgeHovered = over;
+        setMouseCursor(over ? juce::MouseCursor::PointingHandCursor
+                            : juce::MouseCursor::NormalCursor);
+    }
+}
+
+void ChainSlotComponent::mouseExit(const juce::MouseEvent&)
+{
+    if (badgeHovered)
+    {
+        badgeHovered = false;
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
 }
 
 void ChainSlotComponent::paint(juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced(2.0f);
+    const bool isSelected = (model.highlightedRow == rowIndex);
 
     g.setColour(tf::colour::surface2);
     g.fillRoundedRectangle(r, 6.0f);
 
-    if (selected)
+    if (isSelected)
     {
-        g.setColour(tf::colour::accent.withAlpha(0.16f));
+        g.setColour(tf::colour::accent.withAlpha(0.13f));
         g.fillRoundedRectangle(r, 6.0f);
-        g.setColour(tf::colour::accent.withAlpha(0.70f));
-        g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.0f);
+        g.setColour(tf::colour::accent.withAlpha(0.75f));
+        g.drawRoundedRectangle(r.reduced(0.5f), 6.0f, 1.5f);
     }
 
     // Drag grip — three short horizontal bars.
@@ -809,15 +837,24 @@ void ChainSlotComponent::paint(juce::Graphics& g)
     }
     else
     {
-        // Badge acts as the bypass button — reflect state with border colour.
+        // No control assigned — badge still acts as bypass toggle.
+        // Mirror fill+border style of the assigned case so active/bypass state is clearly visible.
         const juce::Colour activeCol = isPreset ? tf::colour::accent
                                                  : juce::Colour(0xff4a9eff);
-        const juce::Colour c = bypassed
-            ? (isPreset ? tf::colour::outline.withAlpha(0.28f)
-                        : tf::colour::warn.withAlpha(0.38f))
-            : activeCol.withAlpha(0.32f);
-        g.setColour(c);
-        g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
+        if (!bypassed)
+        {
+            g.setColour(activeCol.withAlpha(0.22f));
+            g.fillRoundedRectangle(badge, 4.0f);
+            g.setColour(activeCol.withAlpha(0.55f));
+            g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
+        }
+        else
+        {
+            g.setColour(tf::colour::textDim.withAlpha(0.10f));
+            g.fillRoundedRectangle(badge, 4.0f);
+            g.setColour(tf::colour::textDim.withAlpha(0.45f));
+            g.drawRoundedRectangle(badge.reduced(0.5f), 4.0f, 0.8f);
+        }
     }
 
     a.removeFromLeft(4);
@@ -1022,7 +1059,8 @@ void SectionColumnComponent::setRows(int flatRowOffset,
                                       const ChainRow& headerRow,
                                       const juce::Array<ChainRow>& slotRows)
 {
-    sectionId = headerRow.sectionId;
+    sectionId      = headerRow.sectionId;
+    headerRowIndex = flatRowOffset;
 
     slotIndices.clearQuick();
     for (const auto& r : slotRows)
@@ -1046,6 +1084,16 @@ void SectionColumnComponent::setRows(int flatRowOffset,
         slotComps[i]->update(flatRowOffset + 1 + i, slotRows.getReference(i), false);
 
     resized();
+}
+
+juce::Component* SectionColumnComponent::getComponentForRow(int row) const
+{
+    if (headerComp != nullptr && row == headerRowIndex)
+        return headerComp.get();
+    const int slotIdx = row - headerRowIndex - 1;
+    if (slotIdx >= 0 && slotIdx < slotComps.size())
+        return slotComps[slotIdx];
+    return nullptr;
 }
 
 void SectionColumnComponent::resized()
@@ -1260,6 +1308,14 @@ void ChainHorizontalView::setRows(const juce::Array<ChainRow>& rows)
     }
 
     layoutColumns();
+}
+
+juce::Component* ChainHorizontalView::getComponentForRowNumber(int row) const
+{
+    for (auto* col : columns)
+        if (auto* comp = col->getComponentForRow(row))
+            return comp;
+    return nullptr;
 }
 
 void ChainHorizontalView::layoutColumns()

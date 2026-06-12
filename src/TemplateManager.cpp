@@ -13,20 +13,23 @@ juce::StringArray TemplateManager::getSceneNames() const
 
 int TemplateManager::addScene(const juce::String& name,
                                juce::Array<PluginChain::SlotSpec> specs,
-                               juce::Array<PluginChain::SectionDef> sections)
+                               juce::Array<PluginChain::SectionDef> sections,
+                               ControlMap controlMap)
 {
-    scenes.push_back({ name, std::move(specs), std::move(sections) });
+    scenes.push_back({ name, std::move(specs), std::move(sections), std::move(controlMap) });
     return (int) scenes.size() - 1;
 }
 
 void TemplateManager::replaceScene(int index,
                                     juce::Array<PluginChain::SlotSpec> specs,
-                                    juce::Array<PluginChain::SectionDef> sections)
+                                    juce::Array<PluginChain::SectionDef> sections,
+                                    ControlMap controlMap)
 {
     if (juce::isPositiveAndBelow(index, (int) scenes.size()))
     {
-        scenes[(size_t) index].specs    = std::move(specs);
-        scenes[(size_t) index].sections = std::move(sections);
+        scenes[(size_t) index].specs      = std::move(specs);
+        scenes[(size_t) index].sections   = std::move(sections);
+        scenes[(size_t) index].controlMap = std::move(controlMap);
     }
 }
 
@@ -59,7 +62,11 @@ juce::ValueTree TemplateManager::toValueTree() const
     root.setProperty("current", currentIndex, nullptr);
 
     for (const auto& scene : scenes)
-        root.addChild(Preset::toValueTree(scene.specs, scene.sections, scene.name), -1, nullptr);
+    {
+        auto sceneNode = Preset::toValueTree(scene.specs, scene.sections, scene.name);
+        sceneNode.addChild(scene.controlMap.toValueTree(), -1, nullptr);
+        root.addChild(sceneNode, -1, nullptr);
+    }
 
     return root;
 }
@@ -80,6 +87,17 @@ void TemplateManager::fromValueTree(const juce::ValueTree& tree)
         Scene scene;
         scene.name = child.getProperty("name", "Template " + juce::String(i + 1)).toString();
         Preset::fromValueTree(child, scene.specs, scene.sections);
+
+        for (int j = 0; j < child.getNumChildren(); ++j)
+        {
+            const auto sub = child.getChild(j);
+            if (sub.hasType("CONTROLMAP"))
+            {
+                scene.controlMap.fromValueTree(sub);
+                break;
+            }
+        }
+
         scenes.push_back(std::move(scene));
     }
 

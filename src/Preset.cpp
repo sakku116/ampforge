@@ -1,4 +1,5 @@
 #include "Preset.h"
+#include "AppDataDir.h"
 #include "HostDebug.h"
 
 namespace Preset
@@ -189,9 +190,7 @@ bool loadFromFile(const juce::File& file,
 
 juce::File getPresetsDirectory()
 {
-    auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                   .getChildFile("AmpForge")
-                   .getChildFile("presets");
+    auto dir = AppDataDir::get().getChildFile("presets");
     dir.createDirectory();
     return dir;
 }

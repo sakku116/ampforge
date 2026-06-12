@@ -1,15 +1,29 @@
 # Amp Forge — Makefile
 # Build & run targets (tested with Git Bash on Windows)
 
-.PHONY: help build release run run-release clean rebuild scan-worker logs check-sdks
+.PHONY: help build release run run-release clean rebuild scan-worker logs check-sdks installer portable
 
 BUILD_DIR := build
 CONFIG ?= Debug
+VERSION  := $(shell grep -m1 ' VERSION [0-9]' CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 CMAKE   ?= $(shell if command -v cmake >/dev/null 2>&1; then command -v cmake; elif [ -x "/c/Program Files/CMake/bin/cmake.exe" ]; then printf '%s\n' "/c/Program Files/CMake/bin/cmake.exe"; else printf '%s\n' cmake; fi)
+ISCC    ?= $(shell \
+	if [ -x "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]; then \
+		printf '%s\n' '"/c/Program Files (x86)/Inno Setup 6/ISCC.exe"'; \
+	elif [ -x "/c/Program Files/Inno Setup 6/ISCC.exe" ]; then \
+		printf '%s\n' '"/c/Program Files/Inno Setup 6/ISCC.exe"'; \
+	elif command -v ISCC >/dev/null 2>&1; then \
+		command -v ISCC; \
+	else \
+		printf '%s\n' ISCC; \
+	fi)
 VS_GEN  ?= Visual Studio 18 2026
 EXE_PATH := $(BUILD_DIR)/AmpForge_artefacts/$(CONFIG)/Amp Forge.exe
 WORKER_EXE := $(BUILD_DIR)/AmpForge_artefacts/$(CONFIG)/AmpForgeScanWorker.exe
 LOG_FILE := ~/AppData/Roaming/AmpForge/host.log
+INSTALLER_SCRIPT := installer/AmpForge.iss
+INSTALLER_OUT    := dist/AmpForge-Setup-$(VERSION)-x64.exe
+PORTABLE_OUT     := dist/AmpForge-$(VERSION)-portable-x64.zip
 
 help:
 	@echo "Amp Forge — Makefile targets:"
@@ -20,6 +34,8 @@ help:
 	@echo "  make run-release    — Run Release build"
 	@echo "  make rebuild        — Clean + build Debug"
 	@echo "  make clean          — Remove build/ folder"
+	@echo "  make portable       — Build Release + zip portable package → dist/"
+	@echo "  make installer      — Build Release + package installer (requires Inno Setup 6)"
 	@echo "  make scan-worker    — Verify scan worker exists"
 	@echo "  make logs           — Show last 50 lines of host.log"
 	@echo "  make check-sdks     — Show ASIO and VST2 SDK status"
@@ -27,6 +43,7 @@ help:
 	@echo "Environment:"
 	@echo "  CONFIG=Debug|Release — Build config (default: Debug)"
 	@echo "  VS_GEN=<generator>   — CMake generator (default: Visual Studio 18 2026)"
+	@echo "  ISCC=<path>          — Path to ISCC.exe (auto-detected)"
 	@echo ""
 
 build:
@@ -81,5 +98,22 @@ check-sdks:
 	else \
 		echo "[-] VST2 SDK : NOT found — vst2sdk/ folder missing from repo clone"; \
 	fi
+
+installer: release scan-worker
+	@echo "[*] Building installer v$(VERSION)..."
+	@mkdir -p dist
+	@$(ISCC) "/DMyAppVersion=$(VERSION)" "$(INSTALLER_SCRIPT)"
+	@echo "[+] Installer: $(INSTALLER_OUT)"
+
+portable: release scan-worker
+	@echo "[*] Packaging portable zip v$(VERSION)..."
+	@rm -rf dist/portable-staging
+	@mkdir -p dist/portable-staging
+	@cp "$(BUILD_DIR)/AmpForge_artefacts/Release/Amp Forge.exe" dist/portable-staging/
+	@cp "$(BUILD_DIR)/AmpForge_artefacts/Release/AmpForgeScanWorker.exe" dist/portable-staging/
+	@touch dist/portable-staging/portable.txt
+	@cd dist/portable-staging && powershell -NoProfile -Command "Compress-Archive -Path * -DestinationPath '../AmpForge-$(VERSION)-portable-x64.zip' -Force"
+	@rm -rf dist/portable-staging
+	@echo "[+] Portable: $(PORTABLE_OUT)"
 
 .DEFAULT_GOAL := help

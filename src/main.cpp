@@ -1,4 +1,5 @@
 #include <JuceHeader.h>
+#include "AppDataDir.h"
 #include "HostDebug.h"
 #include "MainComponent.h"
 
@@ -8,8 +9,7 @@ std::unique_ptr<juce::FileLogger> fileLogger;
 
 void setupLogging()
 {
-    auto logDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                      .getChildFile("AmpForge");
+    auto logDir = AppDataDir::get();
 
     logDir.createDirectory();
     const auto logFile = logDir.getChildFile("host.log");
@@ -80,7 +80,7 @@ class AmpForgeApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "Amp Forge"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return AMPFORGE_VERSION; }
 
     void initialise(const juce::String&) override
     {

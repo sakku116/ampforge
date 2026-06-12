@@ -101,7 +101,7 @@ Each section has a header row with control buttons:
 
 | Element | Function |
 |---------|----------|
-| **Badge box** (left of name) | **Click** to toggle bypass (Stomp) or activate the slot (Preset). Blue = active stomp, teal = active preset, amber/dim = bypassed. Shows the bound key or CC label when a control is assigned |
+| **Badge box** (left of name) | **Press** to toggle bypass (Stomp) or activate the slot (Preset) — fires on mouse-down for instant response. Blue = active stomp, teal = active preset, amber/dim = bypassed. Shows the bound key or CC label when a control is assigned |
 | Plugin name | Display name and format (VST3 / VST2) |
 | `🔊` Volume knob | Per-slot post-gain |
 | Drag grip | Drag to reorder or move the slot into a different section |
@@ -148,7 +148,7 @@ Saves and loads a complete snapshot of the signal chain to a `.tfpreset` file.
 - **Save** — save the current chain (choose a file location)
 - **Load** — load an existing `.tfpreset` file
 
-A preset stores all sections and their order, every plugin, plugin state, bypass status, and control bindings. Bindings survive section reordering because they track stable slot IDs, not positional indexes.
+A preset stores all sections and their order, every plugin, plugin state, individual slot bypass status, section bypass status, and control bindings. Bindings survive section reordering because they track stable slot IDs, not positional indexes.
 
 Default preset folder: `%APPDATA%\AmpForge\presets\`
 

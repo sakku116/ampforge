@@ -79,6 +79,7 @@ public:
     std::function<void(int)> onRename;
     std::function<void(int)> onResetName;
     std::function<void(int)> onLearnControl;
+    std::function<void(int)> onRemoveControl;
 
     // Gain callbacks:
     std::function<void(int, float)> onSlotGainChanged;     // (slotIndex, linearGain)
@@ -94,6 +95,10 @@ public:
 
     void setRows(juce::Array<ChainRow> newRows) { rows = std::move(newRows); }
     const juce::Array<ChainRow>& getRows() const { return rows; }
+
+    // Own selection tracking — used in refreshComponentForRow instead of the JUCE
+    // isRowSelected parameter, which is unreliable when called during child mouseDown.
+    int highlightedRow = -1;
 
     int getSlotCount() const
     {
@@ -166,6 +171,8 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
 
 private:
     ChainListModel& model;
@@ -184,6 +191,7 @@ private:
 
     juce::String controlHint;
     juce::Rectangle<float> badgeRect;
+    bool badgeHovered = false;
 
     bool dragStarted = false;
     static constexpr int kDragThreshold = 6;
@@ -288,6 +296,9 @@ public:
 
     int getNumSlots() const noexcept { return slotIndices.size(); }
 
+    /** Returns the header or slot component whose flat row index equals row, or nullptr. */
+    juce::Component* getComponentForRow(int row) const;
+
     std::function<void(int fromSlot, int toSlot, int sectionIdOverride)> onMovePlugin;
 
     static constexpr int kColumnWidth = 240;
@@ -304,7 +315,8 @@ public:
 private:
     ChainListModel& model;
 
-    int            sectionId  = 0;
+    int            sectionId      = 0;
+    int            headerRowIndex = -1;   // flat row index of the section header
     juce::Array<int> slotIndices;
 
     std::unique_ptr<SectionHeaderComponent> headerComp;
@@ -327,6 +339,9 @@ public:
     explicit ChainHorizontalView(ChainListModel& ownerModel);
 
     void setRows(const juce::Array<ChainRow>& rows);
+
+    /** Returns the header or slot component whose flat row index equals row, or nullptr. */
+    juce::Component* getComponentForRowNumber(int row) const;
 
     std::function<void(int fromSlot, int toSlot, int sectionIdOverride)> onMovePlugin;
 

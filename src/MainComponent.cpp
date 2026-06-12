@@ -74,12 +74,25 @@ MainComponent::MainComponent()
     // Double-click a library item to add it; the chain rows carry their own buttons.
     paletteModel.onDoubleClick = [this](int) { addSelectedToChain(); };
 
-    chainModel.onBypass    = [this](int si) { toggleBypassAt(si); };
-    chainModel.onRemove    = [this](int si) { removeSlotAt(si); };
-    chainModel.onDuplicate = [this](int si) { duplicateSlotAt(si); };
+    chainModel.onBypass    = [this](int si) { clearChainSelection(); toggleBypassAt(si); };
+    chainModel.onRemove    = [this](int si) { clearChainSelection(); removeSlotAt(si); };
+    chainModel.onDuplicate = [this](int si) { clearChainSelection(); duplicateSlotAt(si); };
     chainListBox.onMovePlugin = [this](int from, int to, int sid) { moveSlotAt(from, to, sid); };
     chainModel.onEditor    = [this](int si) { openEditorAt(si); };
-    chainModel.onSelect    = [this](int row) { chainListBox.selectRow(row); };
+    chainModel.onSelect    = [this](int row) {
+        const int prevRow = chainModel.highlightedRow;
+        chainModel.highlightedRow = row;
+        auto repaintChainRow = [this](int r)
+        {
+            if (r < 0) return;
+            juce::Component* comp = chainHorizontalMode
+                ? chainHorizontalView.getComponentForRowNumber(r)
+                : chainListBox.getComponentForRowNumber(r);
+            if (comp) comp->repaint();
+        };
+        repaintChainRow(row);
+        if (prevRow != row) repaintChainRow(prevRow);
+    };
 
     chainModel.onRename = [this](int si)
     {
@@ -129,12 +142,34 @@ MainComponent::MainComponent()
         armActionLearn({ actionType, info.slotId });
     };
 
-    chainModel.onSectionMoveUp   = [this](int id) { moveSectionUpAt(id); };
-    chainModel.onSectionMoveDown = [this](int id) { moveSectionDownAt(id); };
-    chainModel.onSectionRemove   = [this](int id) { removeSectionAt(id); };
+    chainModel.onRemoveControl = [this](int si)
+    {
+        const auto infos = pluginHost.getSlotInfos();
+        if (! juce::isPositiveAndBelow(si, infos.size()))
+            return;
+        const int slotId = infos.getReference(si).slotId;
+
+        for (int b = controlMap.getNumBindings() - 1; b >= 0; --b)
+        {
+            const auto& binding = controlMap.getBinding(b);
+            if (binding.action.index == slotId &&
+                (binding.action.type == ControlAction::Type::toggleBypass ||
+                 binding.action.type == ControlAction::Type::activatePresetSlot))
+                controlMap.removeBinding(b);
+        }
+        saveControlMap();
+        updateControlLabel();
+        refreshChainList();
+        setTemplateDirty(templateManager.getCurrentIndex() >= 0);
+    };
+
+    chainModel.onSectionMoveUp   = [this](int id) { clearChainSelection(); moveSectionUpAt(id); };
+    chainModel.onSectionMoveDown = [this](int id) { clearChainSelection(); moveSectionDownAt(id); };
+    chainModel.onSectionRemove   = [this](int id) { clearChainSelection(); removeSectionAt(id); };
     chainModel.onSectionRename   = [this](int id) { renameSectionAt(id); };
     chainModel.onSectionBypass   = [this](int id, bool bypassed)
     {
+        clearChainSelection();
         pluginHost.setSectionBypassed(id, bypassed);
         refreshChainList();
         setTemplateDirty(templateManager.getCurrentIndex() >= 0);
@@ -687,7 +722,7 @@ void MainComponent::executeAction(const ControlAction& action)
 void MainComponent::captureTemplate()
 {
     const auto name = "Template " + juce::String(templateManager.getNumScenes() + 1);
-    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs());
+    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
     templateManager.setCurrentIndex(idx);
     refreshTemplateSelector();
     saveTemplates();
@@ -702,7 +737,7 @@ void MainComponent::updateTemplate()
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
         return;
 
-    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs());
+    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
     saveTemplates();
     setTemplateDirty(false);
     HostDebug::log("Template updated: index " + juce::String(idx));
@@ -763,6 +798,11 @@ void MainComponent::recallTemplate(int index)
 
     templateManager.setCurrentIndex(index);
     const auto& scene = templateManager.getScene(index);
+
+    // Apply the template's own control map immediately.
+    controlMap = scene.controlMap;
+    saveControlMap();
+    updateControlLabel();
 
     pluginHost.cancelPendingSwitch();
     setChainLoading(true, 0, scene.specs.size());
@@ -857,6 +897,7 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
                         saveControlMap();
                         updateControlLabel();
                         refreshChainList();
+                        setTemplateDirty(templateManager.getCurrentIndex() >= 0);
                         HostDebug::log("Learn: overwrite " + trigger.toString() + " -> " + action.toString());
                     }
                     delete dlg;
@@ -869,6 +910,7 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
     saveControlMap();
     updateControlLabel();
     refreshChainList();
+    setTemplateDirty(templateManager.getCurrentIndex() >= 0);
     HostDebug::log("Learn: bound " + trigger.toString() + " -> " + action.toString());
 }
 
@@ -899,6 +941,7 @@ void MainComponent::clearMappings()
     saveControlMap();
     updateControlLabel();
     refreshChainList();
+    setTemplateDirty(templateManager.getCurrentIndex() >= 0);
     HostDebug::log("Control mappings cleared");
 }
 
@@ -1145,7 +1188,7 @@ void MainComponent::refreshPaletteList()
 
 void MainComponent::refreshChainList()
 {
-    const int selectedRow = chainListBox.getSelectedRow();
+    const int hlRow = chainModel.highlightedRow;
 
     const auto sections  = pluginHost.getSectionDefs();
     const auto slotInfos = pluginHost.getSlotInfos();
@@ -1205,13 +1248,28 @@ void MainComponent::refreshChainList()
     }
 
     chainModel.setRows(rows);
+
+    // Clamp highlight to the new row count.
+    if (! juce::isPositiveAndBelow(hlRow, rows.size()))
+        chainModel.highlightedRow = -1;
+
     chainListBox.updateContent();
     chainHorizontalView.setRows(rows);
 
-    if (juce::isPositiveAndBelow(selectedRow, rows.size()))
-        chainListBox.selectRow(selectedRow, juce::dontSendNotification);
-
     chainListBox.repaint();
+}
+
+void MainComponent::clearChainSelection()
+{
+    const int prevRow = chainModel.highlightedRow;
+    chainModel.highlightedRow = -1;
+    if (prevRow >= 0)
+    {
+        juce::Component* comp = chainHorizontalMode
+            ? chainHorizontalView.getComponentForRowNumber(prevRow)
+            : chainListBox.getComponentForRowNumber(prevRow);
+        if (comp) comp->repaint();
+    }
 }
 
 int MainComponent::getSelectedPaletteRow() const

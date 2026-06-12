@@ -263,7 +263,7 @@ void PluginChain::publishWithCrossfade(std::shared_ptr<SlotList> next, int cross
         }
     }
 
-    processingChannelCount.store(juce::jmax(computeChannelCount(*currentList()),
+    processingChannelCount.store(juce::jmax(computeChannelCount(*activeList.load()),
                                            computeChannelCount(*next)));
 
     const int fadeSamples = juce::jmax(1, (int) (crossfadeMs * 0.001 * currentSampleRate));
@@ -382,15 +382,8 @@ bool PluginChain::addPlugin(const juce::PluginDescription& description, int targ
             // Propagate section-level bypass to the new slot.
             slot->sectionBypassed.store(sectionDefs[(size_t) secIdx].bypassed);
 
-            // Preset section: new slot must start bypassed if there is already an active slot,
-            // so the exclusive-one-active invariant holds from the moment it is inserted.
-            if (sectionDefs[(size_t) secIdx].type == SectionDef::Type::preset)
-            {
-                const bool sectionHasSlots = std::any_of(next->begin(), next->end(),
-                    [targetSectionId](const auto& s) { return s->sectionId == targetSectionId; });
-                if (sectionHasSlots)
-                    slot->bypassed.store(true);
-            }
+            // All new plugins start bypassed/off regardless of section type.
+            slot->bypassed.store(true);
         }
 
         next->insert(next->begin() + insertPos, std::move(slot));
@@ -1138,7 +1131,7 @@ void PluginChain::prepare(double sampleRate, int blockSize, int inputChannels, i
     currentInputChannels = juce::jmax(1, inputChannels);
     currentOutputChannels = juce::jmax(1, outputChannels);
 
-    auto cur = currentList();
+    auto cur = activeList.load();   // the chain currently running on the audio thread
 
     HostDebug::log("Chain prepare: " + juce::String(sampleRate, 1) + " Hz, block " + juce::String(blockSize)
                    + ", in=" + juce::String(currentInputChannels) + ", out=" + juce::String(currentOutputChannels)

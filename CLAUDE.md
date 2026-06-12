@@ -63,6 +63,16 @@ Output: `build/AmpForge_artefacts/Debug/Amp Forge.exe` + `AmpForgeScanWorker.exe
 - **Crossfade** — `fadeInList` holds incoming chain; audio thread blends over N samples, then promotes to `activeList`.
 - **Bypass** — per-slot `atomic<bool>`, no republish needed.
 
+### `currentList()` vs `displayList()` vs `activeList`
+
+| Accessor | Returns | Use from |
+|----------|---------|----------|
+| `activeList.load()` | Chain currently running on audio thread | Audio thread, `publishWithCrossfade`, `prepare()` |
+| `displayList()` | `fadeInList` if non-null, else `activeList` — what the UI is showing | UI queries (`getSlotInfos`, etc.) |
+| `currentList()` | Delegates to `displayList()` | All message-thread edit operations |
+
+**IMPORTANT:** All message-thread edit functions (`setBypass`, `removePlugin`, `movePlugin`, `activatePresetSlot`, `setSectionBypassed`, etc.) use `currentList()` which delegates to `displayList()`. This ensures edits always target the chain the user sees, even during a 25ms audio crossfade after a template switch. `publish()` cancels any in-progress crossfade, so the edit takes effect immediately.
+
 ---
 
 ## Key Data Structures
@@ -365,6 +375,6 @@ Build portable:   make portable
 
 ## Recently Completed Work (last 3 sessions)
 
-1. **Badge-as-bypass button:** Removed `bypassButton` TextButton from `ChainSlotComponent`. The control-binding badge box is now the bypass/activate toggle. `badgeRect` (stored as member, computed in `resized()`) is hit-tested in `mouseUp()`. Click triggers `model.onBypass(slotIndex)` — same stomp/preset behavior as before.
-2. **Chain slot visual polish:** Active stomp slots now show light blue badge (`#4a9eff`) instead of amber to avoid confusion with bypass state. Preset rows use same `surface2` background as stomp rows (no amber tint). Horizontal view hides the section peak meter (`SectionHeaderComponent::timerCallback()` and `paint()` both guard on `horizontalMode`).
-3. **Compact footer:** `rowH` 34→28px, `footerH` 175→128px. Meter strip merged into master area (8px strip, no separate row). `LevelMeterBar::compact = true` on master meters skips 13px label overhead so meters render at small height. Reset buttons (↺) removed; `setDoubleClickReturnValue(true, 1.0)` on both gain sliders. Thin 1px separator lines between footer sections drawn via `footerSep1Y`/`footerSep2Y` in `paint()`.
+1. **Section bypass persistence:** `SectionDef::bypassed` was never written to or read from preset/template XML. Added `propSectionBypassed` identifier in `Preset.cpp` — serialized on save (omitted when `false` for compactness), deserialized with `false` default for backward compat.
+2. **Badge click in horizontal mode:** After the row-selection fix, badge clicks in horizontal mode (inside a `Viewport`) fired `onSelect` + `repaint()` before the bypass, making the hit-test unreliable. Fixed by moving bypass entirely to `mouseDown` (removes the 1-frame delay too — feels like a hardware bypass switch). `mouseUp` now only resets `dragStarted`.
+3. **Template switch edit operations:** `currentList()` previously returned `activeList` (the old chain still playing). During a 25ms crossfade after `recallTemplate`, the UI showed the new chain via `displayList()` but all edits (`setBypass`, `removePlugin`, etc.) targeted the old chain — causing bypass failures, phantom removes, and sometimes wiping all plugins. Fixed by making `currentList()` delegate to `displayList()`. Two call sites that need the truly-playing chain use `activeList.load()` directly: `publishWithCrossfade` (channel count for fade mix) and `prepare()` (audio thread setup).

@@ -20,7 +20,8 @@ namespace
     const juce::Identifier propSectionType("sectionType");
     const juce::Identifier propSlotId    ("slotId");
     const juce::Identifier propPostGain  ("postGain");
-    const juce::Identifier propSectionGain("sectionGain");
+    const juce::Identifier propSectionGain   ("sectionGain");
+    const juce::Identifier propSectionBypassed("sectionBypassed");
 }
 
 juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
@@ -42,6 +43,8 @@ juce::ValueTree toValueTree(const juce::Array<PluginChain::SlotSpec>& specs,
                             nullptr);
         if (sec.gain != 1.0f)
             secNode.setProperty(propSectionGain, sec.gain, nullptr);
+        if (sec.bypassed)
+            secNode.setProperty(propSectionBypassed, true, nullptr);
         root.addChild(secNode, -1, nullptr);
     }
 
@@ -102,7 +105,8 @@ bool fromValueTree(const juce::ValueTree& tree,
         def.type = child.getProperty(propSectionType, "stomp").toString() == "preset"
                    ? PluginChain::SectionDef::Type::preset
                    : PluginChain::SectionDef::Type::stomp;
-        def.gain = (float) (double) child.getProperty(propSectionGain, 1.0);
+        def.gain     = (float) (double) child.getProperty(propSectionGain, 1.0);
+        def.bypassed = (bool) child.getProperty(propSectionBypassed, false);
         outSections.add(def);
     }
 

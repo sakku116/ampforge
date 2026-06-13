@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.1] — 2026-06-13
+
+### Fixed
+- Section bypass state not saved — bypassing a section, saving a preset or template, then reloading the app reset all sections to active.
+- On/off badge in horizontal chain view not responding — clicking the bypass badge selected the row instead of toggling bypass after the row-highlight fix.
+- Bypass and remove operations broken after switching templates — during the 25 ms audio crossfade, edit operations targeted the old chain instead of the newly loaded one, causing bypass to silently fail and remove to sometimes wipe the entire chain.
+- Bypass badge response delay removed — the toggle now fires on mouse press instead of mouse release, matching the feel of a physical hardware bypass switch.
+
+---
+
 ## [0.2.0] — 2026-06-12
 
 ### Added

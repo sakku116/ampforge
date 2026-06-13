@@ -277,6 +277,7 @@ private:
     int  rowToSlotIndex(int row) const;
     int  getTargetSectionId() const;
     int  findSlotIndexById(int slotId) const;
+    void clearChainSelection();
 
     void savePreset();
     void loadPreset();

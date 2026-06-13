@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include <vector>
 #include "PluginChain.h"
+#include "ControlMap.h"
 
 /** A set of named templates. A template is a full pedalboard snapshot (the same SlotSpec list a
     preset stores). Switching templates is done by the owner via PluginHost crossfade/preload;
@@ -15,6 +16,7 @@ public:
         juce::String name;
         juce::Array<PluginChain::SlotSpec> specs;
         juce::Array<PluginChain::SectionDef> sections;
+        ControlMap controlMap;
     };
 
     int getNumScenes() const { return (int) scenes.size(); }
@@ -23,10 +25,12 @@ public:
 
     int  addScene(const juce::String& name,
                   juce::Array<PluginChain::SlotSpec> specs,
-                  juce::Array<PluginChain::SectionDef> sections);
+                  juce::Array<PluginChain::SectionDef> sections,
+                  ControlMap controlMap = {});
     void replaceScene(int index,
                       juce::Array<PluginChain::SlotSpec> specs,
-                      juce::Array<PluginChain::SectionDef> sections);
+                      juce::Array<PluginChain::SectionDef> sections,
+                      ControlMap controlMap = {});
     void renameScene(int index, const juce::String& name);
     void removeScene(int index);
     void clear();

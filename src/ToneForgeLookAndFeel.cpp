@@ -36,6 +36,20 @@ ToneForgeLookAndFeel::ToneForgeLookAndFeel()
     setColour(juce::TextEditor::outlineColourId,         outline);
     setColour(juce::TextEditor::focusedOutlineColourId,  accent);
     setColour(juce::CaretComponent::caretColourId,       accent);
+
+    setColour(juce::TooltipWindow::backgroundColourId,   surface2);
+    setColour(juce::TooltipWindow::outlineColourId,      outline);
+    setColour(juce::TooltipWindow::textColourId,         text);
+}
+
+void ToneForgeLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, int width, int height)
+{
+    // The tooltip window is forced opaque by JUCE, so the area outside the rounded
+    // rect would otherwise render as white. Paint it with the dark app backdrop first
+    // so the rounded corners read as transparent against the themed UI, then let the
+    // base class draw the rounded surface, outline and text on top.
+    g.fillAll(tf::colour::background);
+    juce::LookAndFeel_V4::drawTooltip(g, text, width, height);
 }
 
 void ToneForgeLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button,

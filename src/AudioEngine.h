@@ -58,7 +58,6 @@ public:
 
     // ── Performance metrics (Phase 3) ─────────────────────────────────────────
     double getCpuUsagePercent() const { return deviceManager.getCpuUsage() * 100.0; }
-    double getDspLoadPercent() const  { return dspLoad.load() * 100.0; }
     double getInputLatencyMs() const;
     double getOutputLatencyMs() const;
     double getChainLatencyMs() const;
@@ -94,7 +93,6 @@ private:
     std::atomic<float> masterOutputPeakLevel { 0.0f };
 
     // metrics
-    std::atomic<double> dspLoad { 0.0 };       // smoothed processAudio time / block time
     double currentSampleRateHz   = 0.0;
     int    currentBlockSizeSamples = 0;
     int    inputLatencySamples   = 0;

@@ -4,6 +4,8 @@ A real-time guitar multi-effects processor for Windows, built with JUCE and C++2
 
 Designed to replace a physical pedalboard on a desktop — arrange effects in any order, toggle bypass per pedal, save presets, and bind MIDI footswitches or keyboard keys to actions for live use.
 
+**[Download latest release — v0.3.0](https://github.com/sakku116/ampforge/releases/tag/v0.3.0)**
+
 ---
 
 ## Features

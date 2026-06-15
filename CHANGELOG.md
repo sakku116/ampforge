@@ -6,6 +6,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.3.0] — 2026-06-16
+
+### Added
+- Real-time CPU usage indicator for the host process in the header metrics area.
+
+### Fixed
+- Tooltip background now uses the themed dark surface with rounded corners instead of the system default.
+
+---
+
 ## [0.2.1] — 2026-06-13
 
 ### Fixed

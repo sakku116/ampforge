@@ -124,18 +124,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* inputChan
     midiBuffer.clear();
     midiCollector.removeNextBlockOfMessages(midiBuffer, numSamples);   // live MIDI input
 
-    const auto startTicks = juce::Time::getHighResolutionTicks();
     pluginHost.processAudio(processingBuffer, midiBuffer);
-    const auto elapsedSeconds = juce::Time::highResolutionTicksToSeconds(
-        juce::Time::getHighResolutionTicks() - startTicks);
-
-    if (currentSampleRateHz > 0.0)
-    {
-        const double blockSeconds = (double) numSamples / currentSampleRateHz;
-        const double load = blockSeconds > 0.0 ? elapsedSeconds / blockSeconds : 0.0;
-        const double prev = dspLoad.load();
-        dspLoad.store(prev + 0.1 * (load - prev));   // exponential smoothing
-    }
 
     const float outGain = masterMuted.load() ? 0.0f : masterOutputGain.load();
     for (int ch = 0; ch < numOutputChannels; ++ch)

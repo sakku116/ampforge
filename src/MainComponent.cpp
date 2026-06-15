@@ -21,11 +21,23 @@ MainComponent::MainComponent()
     titleLabel.setColour(juce::Label::textColourId, tf::colour::text);
     addAndMakeVisible(titleLabel);
 
-    metricsLabel.setFont(juce::FontOptions(13.0f));
-    metricsLabel.setColour(juce::Label::textColourId, tf::colour::accent);
-    metricsLabel.setJustificationType(juce::Justification::centredRight);
-    metricsLabel.setText("CPU --  DSP --  Latency --", juce::dontSendNotification);
-    addAndMakeVisible(metricsLabel);
+    // Metrics readout split into fixed-width fields so the "CPU"/"DSP"/"Lat" prefixes
+    // stay anchored when the numbers change digit count (no monospace needed — each
+    // label owns a fixed box and the digits grow within it).
+    const juce::String metricsTip = "CPU: overall process load across all threads. "
+                                     "DSP: audio engine load - percentage of the real-time audio block "
+                                     "deadline used on the audio thread.";
+    for (auto* l : { &cpuLabel, &dspLabel, &metricsLabel })
+    {
+        l->setFont(juce::FontOptions(13.0f));
+        l->setColour(juce::Label::textColourId, tf::colour::accent);
+        l->setJustificationType(juce::Justification::centredLeft);
+        l->setTooltip(metricsTip);
+        addAndMakeVisible(*l);
+    }
+    cpuLabel.setText("CPU --", juce::dontSendNotification);
+    dspLabel.setText("DSP --", juce::dontSendNotification);
+    metricsLabel.setText("Lat --", juce::dontSendNotification);
 
     // Section headers: small, bold, accent-coloured.
     for (auto* l : { &paletteLabel, &chainLabel, &templatesLabel, &controlSectionLabel, &masterLabel })
@@ -441,7 +453,10 @@ void MainComponent::resized()
     headerPanel = area.removeFromTop(52);
     {
         auto h = headerPanel.reduced(16, 0);
-        metricsLabel.setBounds(h.removeFromRight(340));
+        auto metrics = h.removeFromRight(360);
+        cpuLabel.setBounds(metrics.removeFromLeft(92));
+        dspLabel.setBounds(metrics.removeFromLeft(92));
+        metricsLabel.setBounds(metrics);
         titleLabel.setBounds(h);
     }
     area.removeFromTop(gap);
@@ -1131,13 +1146,20 @@ void MainComponent::timerCallback()
 {
     updateControlLabel();
 
+    // Refresh the metrics readout only every 5th tick (~0.5s) so the numbers are
+    // legible instead of flickering at the full 10Hz timer rate.
+    if (++metricsTick < 5)
+        return;
+    metricsTick = 0;
+
+    const double cpuPct = processCpu.sample();
+    cpuLabel.setText("CPU " + juce::String(cpuPct, 2) + "%", juce::dontSendNotification);
+    dspLabel.setText("DSP " + juce::String(audioEngine.getCpuUsagePercent(), 2) + "%", juce::dontSendNotification);
+
     juce::String text;
-    text << "CPU " << juce::String(audioEngine.getCpuUsagePercent(), 0) << "%"
-         << "   DSP " << juce::String(audioEngine.getDspLoadPercent(), 0) << "%"
-         << "   Lat " << juce::String(audioEngine.getRoundTripLatencyMs(), 1) << " ms"
+    text << "Lat " << juce::String(audioEngine.getRoundTripLatencyMs(), 1) << " ms"
          << "  (" << juce::String((int) audioEngine.getCurrentSampleRate()) << " Hz / "
          << juce::String(audioEngine.getCurrentBlockSize()) << ")";
-
     metricsLabel.setText(text, juce::dontSendNotification);
 }
 

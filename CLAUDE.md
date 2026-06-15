@@ -4,6 +4,17 @@ Quick-load context for Claude Code sessions. Read this before touching any file.
 
 ---
 
+## Language Conventions
+
+**Always write in English when touching the codebase or interacting with git**, regardless of the language used in chat. This applies to:
+- Source code: comments, identifiers, log messages, UI strings, tooltips.
+- Documentation files (CLAUDE.md, README, CHANGELOG, code docs).
+- Git activity: commit messages, branch names, PR titles and descriptions, code review comments.
+
+Chat replies to the user may follow the user's language; only the artifacts above must stay in English.
+
+---
+
 ## Project Summary
 
 **What it is:** A real-time desktop VST3/VST2 plugin host for guitar processing. Windows only, built with JUCE 8.0.2 + C++20. Two executables: the GUI host and a subprocess scanner.

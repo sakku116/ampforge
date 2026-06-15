@@ -35,6 +35,8 @@ public:
 
     void positionComboBoxText(juce::ComboBox&, juce::Label&) override;
 
+    void drawTooltip(juce::Graphics&, const juce::String& text, int width, int height) override;
+
     int getDefaultScrollbarWidth() override { return 10; }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ToneForgeLookAndFeel)

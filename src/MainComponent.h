@@ -9,6 +9,7 @@
 #include "TemplateManager.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
+#include "ProcessCpuMeter.h"
 
 class MainComponent : public juce::Component,
                       public juce::DragAndDropContainer,
@@ -319,7 +320,11 @@ private:
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
-    juce::Label metricsLabel;
+    juce::Label cpuLabel;            // "CPU NN.NN%"  (fixed box, prefix stays put)
+    juce::Label dspLabel;            // "DSP NN.NN%"
+    juce::Label metricsLabel;        // "Lat N.N ms (sr / block)"
+    ProcessCpuMeter processCpu;
+    int metricsTick = 0;             // throttles metrics refresh to ~0.5s (timer runs at 10Hz)
     juce::Label paletteLabel        { {}, "LIBRARY" };
     juce::Label chainLabel          { {}, "SIGNAL CHAIN" };
     juce::Label templatesLabel      { {}, "TEMPLATES" };

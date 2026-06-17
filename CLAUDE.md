@@ -312,7 +312,15 @@ project(AmpForge VERSION X.Y.Z LANGUAGES CXX)
 ```
 Makefile, app title bar, and installer filename all derive from this automatically.
 
-### 3. Generate CHANGELOG entry
+### 3. Update README download link
+
+In [README.md](README.md), update the download link line near the top to point to the new release:
+
+```markdown
+**[Download latest release — vX.Y.Z](https://github.com/sakku116/ampforge/releases/tag/vX.Y.Z)**
+```
+
+### 4. Generate CHANGELOG entry
 
 Collect all commits since the last tag:
 ```bash
@@ -338,10 +346,10 @@ Rules:
 - Only surface user-visible changes; omit pure refactors and CI noise.
 - If [CHANGELOG.md](CHANGELOG.md) doesn't exist yet, create it with a `# Changelog` heading first.
 
-### 4. Commit & PR dev → main
+### 5. Commit & PR dev → main
 
 ```bash
-git add CMakeLists.txt CHANGELOG.md
+git add CMakeLists.txt CHANGELOG.md README.md
 git commit -m "chore: release vX.Y.Z"
 git push origin dev
 gh pr create --base main --title "Release vX.Y.Z" --body "$(cat <<'EOF'
@@ -359,7 +367,7 @@ EOF
 
 **Never merge the PR yourself** — wait for user confirmation.
 
-### 5. Tag & build artifacts (after PR is merged to main)
+### 6. Tag & build artifacts (after PR is merged to main)
 
 ```bash
 git checkout main && git pull

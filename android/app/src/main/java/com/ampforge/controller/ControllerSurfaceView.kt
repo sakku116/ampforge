@@ -35,7 +35,6 @@ class ControllerSurfaceView(
     private val stompActive = Color.rgb(0x4a, 0x9e, 0xff)   // blue active Stomp
     private val stompBypassed = Color.rgb(0xe2, 0xb5, 0x3a) // amber bypassed Stomp
     private val presetActive = Color.rgb(0x21, 0xc0, 0x8a)  // teal active Preset
-    private val warn = Color.rgb(0xe2, 0xb5, 0x3a)
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val outlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -114,7 +113,7 @@ class ControllerSurfaceView(
         titlePaint.color = textDim
         canvas.drawText("AMP FORGE CONTROLLER", dp(14f), dp(24f), titlePaint)
         statusPaint.color = when {
-            statusMismatch -> warn
+            statusMismatch -> stompBypassed
             statusConnected -> presetActive
             else -> textDim
         }
@@ -124,19 +123,8 @@ class ControllerSurfaceView(
     }
 
     private fun drawGrid(canvas: Canvas) {
-        val top = dp(38f) + dp(10f)
-        val gap = dp(8f)
-        val cellW = (width - gap * 5) / 4f
-        val cellH = (height - top - dp(10f) - gap * 3) / 2f
-        val cols = 4
-
-        for (i in buttons.indices) {
-            val col = i % cols
-            val row = i / cols
-            val left = gap + col * (cellW + gap)
-            val topC = top + row * (cellH + gap)
-            drawButton(canvas, i, RectF(left, topC, left + cellW, topC + cellH))
-        }
+        val layout = gridLayout()
+        for (i in buttons.indices) drawButton(canvas, i, cellRect(layout, i))
     }
 
     private fun drawButton(canvas: Canvas, index: Int, rect: RectF) {
@@ -231,16 +219,33 @@ class ControllerSurfaceView(
     }
 
     private fun cellAt(x: Float, y: Float): Int {
+        val layout = gridLayout()
+        if (y < layout.top || x < layout.gap) return -1
+        val col = ((x - layout.gap) / (layout.cellW + layout.gap)).toInt()
+        val row = ((y - layout.top) / (layout.cellH + layout.gap)).toInt()
+        if (col !in 0 until layout.cols || row !in 0 until layout.rows) return -1
+        return row * layout.cols + col
+    }
+
+    // ── Grid layout: single source for drawing and touch hit-testing ──────────
+
+    private class GridLayout(val top: Float, val gap: Float, val cellW: Float, val cellH: Float) {
+        val cols = 4
+        val rows = 2
+    }
+
+    private fun gridLayout(): GridLayout {
         val top = dp(38f) + dp(10f)
         val gap = dp(8f)
-        val cellW = (width - gap * 5) / 4f
-        val cellH = (height - top - dp(10f) - gap * 3) / 2f
-        val cols = 4
-        if (y < top || x < gap) return -1
-        val col = ((x - gap) / (cellW + gap)).toInt()
-        val row = ((y - top) / (cellH + gap)).toInt()
-        if (col !in 0 until cols || row !in 0 until 2) return -1
-        return row * cols + col
+        return GridLayout(top, gap, (width - gap * 5) / 4f, (height - top - dp(10f) - gap * 3) / 2f)
+    }
+
+    private fun cellRect(layout: GridLayout, index: Int): RectF {
+        val col = index % layout.cols
+        val row = index / layout.cols
+        val left = layout.gap + col * (layout.cellW + layout.gap)
+        val top = layout.top + row * (layout.cellH + layout.gap)
+        return RectF(left, top, left + layout.cellW, top + layout.cellH)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

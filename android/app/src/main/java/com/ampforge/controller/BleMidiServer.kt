@@ -140,7 +140,7 @@ class BleMidiServer(
     /** Starts advertising and serving the MIDI GATT service. Safe to call repeatedly. */
     @SuppressLint("MissingPermission")
     fun start() {
-        if (started.getAndSet(true)) return
+        if (started.get()) return
         val bt = adapter ?: return
         if (!bt.isEnabled) return
         val server = bluetoothManager?.openGattServer(appContext, gattCallback) ?: return
@@ -178,6 +178,9 @@ class BleMidiServer(
             val adData = AdvertiseData.Builder().addServiceUuid(ParcelUuid(MIDI_SERVICE)).build()
             leAdvertiser.startAdvertising(settings, adData, advertiseCallback)
         }
+        // Latch only after setup succeeds so a failed start (BT off, no adapter, no
+        // GATT server) can be retried on the next onResume instead of staying dead.
+        started.set(true)
     }
 
     /** Stops advertising and closes the GATT server (inactive while backgrounded/locked). */
@@ -220,7 +223,7 @@ class BleMidiServer(
         val characteristic = midiDataCharacteristic ?: return
         val timestamp = (SystemClock.elapsedRealtime() and 0x3FFF).toInt()
         for (packet in BleMidiPacket.encode(message, timestamp)) {
-            server.notifyCharacteristicChanged(device, characteristic, true, packet)
+            server.notifyCharacteristicChanged(device, characteristic, false, packet)
         }
     }
 

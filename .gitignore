@@ -135,3 +135,14 @@ agent/
 # ASIOSDK/ is tracked (GPL v3 — see ASIOSDK/LICENSE.txt)
 # vst2sdk/ is tracked (MIT clean-room — see vst2sdk/LICENSE)
 VST_SDK/    # VST3 SDK full download — not needed, JUCE bundles VST3
+
+# Android Controller App (android/)
+android/.gradle/
+android/local.properties
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/release/
+
+# Local toolchains / temp work (AGENTS.md .scratch)
+.scratch/

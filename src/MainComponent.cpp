@@ -684,6 +684,12 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
     if (! action.isValid())
         return;
 
+    // Bluetooth MIDI transport validation (#10): echo the triggering message
+    // back to the source device so a phone app can prove the host->device
+    // return path. No-op unless a MIDI output (e.g. paired phone) is open.
+    // Superseded by Controller Bridge feedback in #11.
+    audioEngine.sendMidiMessage(message);
+
     juce::MessageManager::callAsync([this, action] { executeAction(action); });
 }
 

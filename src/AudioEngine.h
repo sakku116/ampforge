@@ -19,6 +19,12 @@ public:
     /** Enables every available MIDI input device and routes it into the engine. */
     void enableAllMidiInputs();
 
+    /** Opens every available MIDI output device (e.g. a paired Bluetooth MIDI controller). */
+    void openMidiOutputs();
+
+    /** Sends a message to every open MIDI output device. No-op when none are open. */
+    void sendMidiMessage(const juce::MidiMessage& message);
+
     /** Hook invoked (on the MIDI thread) for each incoming message, for control mapping. */
     std::function<void(const juce::MidiMessage&)> onMidiForControl;
 
@@ -83,6 +89,7 @@ private:
     juce::AudioBuffer<float> processingBuffer;
     juce::MidiBuffer midiBuffer;
     juce::MidiMessageCollector midiCollector;
+    std::vector<std::unique_ptr<juce::MidiOutput>> midiOutputs;
 
     std::atomic<float> masterInputGain  { 1.0f };
     std::atomic<float> masterOutputGain { 1.0f };

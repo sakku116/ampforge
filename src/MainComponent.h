@@ -6,6 +6,7 @@
 #include "PluginHost.h"
 #include "PluginScanner.h"
 #include "ControlMap.h"
+#include "ControllerBridge.h"
 #include "TemplateManager.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
@@ -287,7 +288,7 @@ private:
     void tryRestoreLastPreset();
 
     // Live control (Phase 4)
-    void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
+    void handleControlMidi(const juce::MidiMessage& message, const juce::String& sourceDeviceName);   // called on the MIDI thread
     void executeAction(const ControlAction& action);           // called on the message thread
 
     // Templates (Phase 4.5)
@@ -310,6 +311,10 @@ private:
     void saveControlMap();
     void restoreControlMap();
 
+    // Android Controller Bridge (Phase 4.8)
+    void updateControllerStatus();
+    ControllerBridge::HostState buildControllerState() const;
+
     // ── Theme (declared first so it outlives every child component) ────────────
     ToneForgeLookAndFeel lookAndFeel;
 
@@ -317,6 +322,7 @@ private:
     PluginHost pluginHost;
     AudioEngine audioEngine;
     PluginScanner pluginScanner;
+    ControllerBridge controllerBridge;
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
@@ -367,6 +373,7 @@ private:
     LevelMeterBar    masterOutputMeter;
 
     juce::Label      controlLabel;
+    juce::Label      controllerStatusLabel;   // Android controller connected / mismatch / disconnected
     juce::TextButton learnExprButton         { "Learn Expression" };
     juce::TextButton clearMapsButton         { "Clear Maps" };
 

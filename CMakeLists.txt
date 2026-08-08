@@ -40,6 +40,8 @@ target_sources(AmpForge
         src/Preset.cpp
         src/ControlMap.h
         src/ControlMap.cpp
+        src/ControllerBridge.h
+        src/ControllerBridge.cpp
         src/TemplateManager.h
         src/TemplateManager.cpp
         src/PluginHost.h
@@ -82,6 +84,32 @@ target_link_libraries(AmpForgeScanWorker
 )
 
 add_dependencies(AmpForge AmpForgeScanWorker)
+
+# ---------------------------------------------------------------------------
+# Deterministic host-side tests for the Controller Bridge (#11). Console app;
+# exercises the bridge's public MIDI boundary with a fake outgoing endpoint.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeControllerBridgeTests
+    PRODUCT_NAME "AmpForgeControllerBridgeTests"
+)
+
+juce_generate_juce_header(AmpForgeControllerBridgeTests)
+
+target_sources(AmpForgeControllerBridgeTests
+    PRIVATE
+        tests/ControllerBridgeTests.cpp
+        src/ControllerBridge.cpp
+        src/ControllerProtocol.h
+)
+
+target_link_libraries(AmpForgeControllerBridgeTests
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_events
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
 
 add_custom_command(TARGET AmpForgeScanWorker POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

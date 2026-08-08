@@ -34,6 +34,7 @@ public:
     void movePlugin(int fromIndex, int toIndex, int sectionIdOverride = -1);
     void setBypass(int index, bool shouldBypass);
     void setSectionBypassed(int sectionId, bool shouldBypass) { chain.setSectionBypassed(sectionId, shouldBypass); }
+    bool isSectionBypassed(int sectionId) const { return chain.isSectionBypassed(sectionId); }
     void setSlotGain(int index, float linearGain)             { chain.setSlotGain(index, linearGain); }
     float getSlotGain(int index) const                        { return chain.getSlotGain(index); }
     void setSectionGain(int sectionId, float linearGain)      { chain.setSectionGain(sectionId, linearGain); }

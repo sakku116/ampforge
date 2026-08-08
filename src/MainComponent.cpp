@@ -253,6 +253,12 @@ MainComponent::MainComponent()
     controlLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(controlLabel);
 
+    controllerStatusLabel.setFont(juce::FontOptions(12.5f));
+    controllerStatusLabel.setColour(juce::Label::textColourId, tf::colour::textDim);
+    controllerStatusLabel.setJustificationType(juce::Justification::centredRight);
+    controllerStatusLabel.setText("Controller: Disconnected", juce::dontSendNotification);
+    addAndMakeVisible(controllerStatusLabel);
+
     templateDirtyLabel.setText(juce::String::fromUTF8("\xe2\x97\x8f modified"), juce::dontSendNotification);
     templateDirtyLabel.setFont(juce::FontOptions(12.5f, juce::Font::bold));
     templateDirtyLabel.setColour(juce::Label::textColourId, tf::colour::warn);
@@ -331,7 +337,18 @@ MainComponent::MainComponent()
     audioEngine.start();
     tryRestoreAudioDeviceState();
 
-    audioEngine.onMidiForControl = [this](const juce::MidiMessage& m) { handleControlMidi(m); };
+    audioEngine.onMidiForControl = [this](const juce::MidiMessage& m, const juce::String& src)
+    {
+        handleControlMidi(m, src);
+    };
+
+    // Controller Bridge (#11): the host-side seam that mirrors learned Stomp/Preset
+    // assignments to a paired Bluetooth MIDI controller and feeds it snapshots/updates.
+    controllerBridge.setSendCallback([this](const juce::MidiMessage& message)
+    {
+        audioEngine.sendMidiMessage(message);
+    });
+    controllerBridge.setHostStateProvider([this] { return buildControllerState(); });
 
     startTimerHz(10);   // performance metrics refresh
 
@@ -525,6 +542,7 @@ void MainComponent::resized()
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
         learnExprButton    .setBounds(controlRow.removeFromLeft(110)); controlRow.removeFromLeft(5);
         clearMapsButton    .setBounds(controlRow.removeFromLeft(80));  controlRow.removeFromLeft(8);
+        controllerStatusLabel.setBounds(controlRow.removeFromRight(190));
         controlLabel       .setBounds(controlRow);
     }
     area.removeFromBottom(gap);
@@ -632,8 +650,13 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &clearMapsButton)    { clearMappings();     return; }
 }
 
-void MainComponent::handleControlMidi(const juce::MidiMessage& message)
+void MainComponent::handleControlMidi(const juce::MidiMessage& message, const juce::String& sourceDeviceName)
 {
+    // The Controller Bridge consumes the Android controller's ready request; all other
+    // messages (including its channel-16 button notes) pass through to the existing flows.
+    if (controllerBridge.handleIncomingMidi(message, sourceDeviceName))
+        return;
+
     if (expressionLearnArmed.load())
     {
         if (! message.isController())
@@ -683,12 +706,6 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message)
 
     if (! action.isValid())
         return;
-
-    // Bluetooth MIDI transport validation (#10): echo the triggering message
-    // back to the source device so a phone app can prove the host->device
-    // return path. No-op unless a MIDI output (e.g. paired phone) is open.
-    // Superseded by Controller Bridge feedback in #11.
-    audioEngine.sendMidiMessage(message);
 
     juce::MessageManager::callAsync([this, action] { executeAction(action); });
 }
@@ -982,6 +999,82 @@ void MainComponent::updateControlLabel()
     controlLabel.setText(text, juce::dontSendNotification);
 }
 
+ControllerBridge::HostState MainComponent::buildControllerState() const
+{
+    // Controller Mirror input: only learned Stomp/Preset slot actions triggered by
+    // Controller Surface notes (60..67) on the Android MIDI channel (or "any").
+    ControllerBridge::HostState state;
+    const auto slotInfos = pluginHost.getSlotInfos();
+
+    for (int b = 0; b < controlMap.getNumBindings(); ++b)
+    {
+        const auto& binding = controlMap.getBinding(b);
+        const auto& trigger = binding.trigger;
+
+        if (trigger.type != ControlTrigger::Type::midiNote)
+            continue;
+        if (trigger.channel != tf::ctrl::midiChannel && trigger.channel != 0)
+            continue;
+        if (tf::ctrl::noteToButton(trigger.number) < 0)
+            continue;
+
+        const auto& action = binding.action;
+        if (action.type != ControlAction::Type::toggleBypass
+            && action.type != ControlAction::Type::activatePresetSlot)
+            continue;   // only Stomp/Preset slot actions are mirrored
+
+        // ControlAction::index holds the stable slotId for slot actions.
+        const int slotIndex = findSlotIndexById(action.index);
+        if (! juce::isPositiveAndBelow(slotIndex, slotInfos.size()))
+            continue;
+
+        const auto& info = slotInfos.getReference(slotIndex);
+
+        ControllerBridge::HostState::Button button;
+        button.note           = trigger.number;
+        button.label          = info.name;
+        button.isPreset       = info.isPreset;
+        button.bypassed       = info.bypassed;
+        button.sectionBypassed = pluginHost.isSectionBypassed(info.sectionId);
+        state.buttons.push_back(button);
+    }
+
+    return state;
+}
+
+void MainComponent::updateControllerStatus()
+{
+    // Device-gone detection: a connected controller whose MIDI input device has
+    // vanished is treated as disconnected until its next ready request.
+    if (controllerBridge.isConnected() && controllerBridge.getControllerDeviceName().isNotEmpty())
+    {
+        bool found = false;
+        for (const auto& device : juce::MidiInput::getAvailableDevices())
+            if (device.name == controllerBridge.getControllerDeviceName())
+            {
+                found = true;
+                break;
+            }
+
+        if (! found)
+            controllerBridge.notifyDisconnected();
+    }
+
+    juce::String text;
+    juce::Colour colour = tf::colour::textDim;
+
+    switch (controllerBridge.getStatus())
+    {
+        case ControllerBridge::Status::connected:    text = "Controller: Connected";   colour = tf::colour::accent; break;
+        case ControllerBridge::Status::incompatible: text = "Controller: v Mismatch";  colour = tf::colour::warn;   break;
+        case ControllerBridge::Status::disconnected:
+        default:                                    text = "Controller: Disconnected"; break;
+    }
+
+    controllerStatusLabel.setText(text, juce::dontSendNotification);
+    controllerStatusLabel.setColour(juce::Label::textColourId, colour);
+}
+
 void MainComponent::setTemplateDirty(bool dirty)
 {
     templateDirty = dirty;
@@ -1151,6 +1244,7 @@ void MainComponent::saveInputChannel()
 void MainComponent::timerCallback()
 {
     updateControlLabel();
+    updateControllerStatus();
 
     // Refresh the metrics readout only every 5th tick (~0.5s) so the numbers are
     // legible instead of flickering at the full 10Hz timer rate.
@@ -1285,6 +1379,10 @@ void MainComponent::refreshChainList()
     chainHorizontalView.setRows(rows);
 
     chainListBox.repaint();
+
+    // Any chain/control-map change can affect the Controller Mirror; refresh it so the
+    // paired controller stays in sync (no-op while no controller is connected).
+    controllerBridge.refresh();
 }
 
 void MainComponent::clearChainSelection()

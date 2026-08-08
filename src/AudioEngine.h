@@ -25,8 +25,9 @@ public:
     /** Sends a message to every open MIDI output device. No-op when none are open. */
     void sendMidiMessage(const juce::MidiMessage& message);
 
-    /** Hook invoked (on the MIDI thread) for each incoming message, for control mapping. */
-    std::function<void(const juce::MidiMessage&)> onMidiForControl;
+    /** Hook invoked (on the MIDI thread) for each incoming message, for control mapping.
+        Carries the name of the source MIDI device so the Controller Bridge can track it. */
+    std::function<void(const juce::MidiMessage&, const juce::String& sourceDeviceName)> onMidiForControl;
 
     juce::AudioDeviceManager& getDeviceManager() { return deviceManager; }
 

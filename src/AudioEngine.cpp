@@ -225,12 +225,12 @@ void AudioEngine::audioDeviceStopped()
         onDeviceChanged();
 }
 
-void AudioEngine::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)
+void AudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message)
 {
     midiCollector.addMessageToQueue(message);   // forwarded to the plugin chain on the audio thread
 
     if (onMidiForControl)
-        onMidiForControl(message);              // tapped for control mapping (Phase 4.2)
+        onMidiForControl(message, source != nullptr ? source->getName() : juce::String());
 }
 
 double AudioEngine::getInputLatencyMs() const

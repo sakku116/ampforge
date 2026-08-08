@@ -1,7 +1,7 @@
 # Amp Forge — Makefile
 # Build & run targets (tested with Git Bash on Windows)
 
-.PHONY: help build release run run-release clean rebuild scan-worker logs check-sdks installer portable
+.PHONY: help build release run run-release clean rebuild scan-worker logs check-sdks installer portable controller-app
 
 BUILD_DIR := build
 CONFIG ?= Debug
@@ -39,6 +39,7 @@ help:
 	@echo "  make scan-worker    — Verify scan worker exists"
 	@echo "  make logs           — Show last 50 lines of host.log"
 	@echo "  make check-sdks     — Show ASIO and VST2 SDK status"
+	@echo "  make controller-app — Build the Android Controller App (requires Android SDK)"
 	@echo ""
 	@echo "Environment:"
 	@echo "  CONFIG=Debug|Release — Build config (default: Debug)"
@@ -117,3 +118,9 @@ portable: release scan-worker
 	@echo "[+] Portable: $(PORTABLE_OUT)"
 
 .DEFAULT_GOAL := help
+
+CONTROLLER_APK := android/app/build/outputs/apk/release/app-release.apk
+
+controller-app:
+	@cd android && ./gradlew :app:assembleRelease :app:testDebugUnitTest --no-daemon
+	@echo "[+] Controller App APK: $(CONTROLLER_APK)"

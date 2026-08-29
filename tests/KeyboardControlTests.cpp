@@ -560,6 +560,82 @@ int main()
         controller.disableCapture();
     }
 
+    // ── Slice 11: Ticket 17.3 UI-toggle contract — status callback is the visible
+    // mirror: enable → ON reported; disable → OFF; failed ownership → OFF + short
+    // reason; failed hook → OFF + short reason; session-only means a fresh controller
+    // starts OFF and never reports a persisted state. ───────────────────────────
+    {
+        struct UiMirror
+        {
+            bool enabled = false;
+            int lastFailReason = tf::kb::FailReason::none;
+            int changes = 0;
+
+            void clear() { enabled = false; lastFailReason = tf::kb::FailReason::none; changes = 0; }
+        } ui;
+
+        bool ownershipAvailable = true;
+        bool hookInstallOk = true;
+        int ownershipReleases = 0;
+        int hookUninstalls = 0;
+
+        KeyboardControlController controller;
+        controller.setStatusCallback([&](bool enabled, int failReason)
+        {
+            ++ui.changes;
+            ui.enabled = enabled;
+            ui.lastFailReason = failReason;
+        });
+        controller.setOwnershipProvider([&] { return ownershipAvailable; });
+        controller.setOwnershipReleaseCallback([&] { ++ownershipReleases; });
+        controller.setHookInstallProvider([&] { return hookInstallOk; });
+        controller.setHookUninstallCallback([&] { ++hookUninstalls; });
+
+        // Session-only initialization: a new controller is OFF and reports nothing.
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(ui.changes == 0);
+
+        // Enable: the UI mirror flips to ON with no failure reason.
+        CHECK(controller.enableCapture());
+        CHECK(ui.enabled);
+        CHECK(ui.lastFailReason == tf::kb::FailReason::none);
+        CHECK(controller.isCaptureEnabled());
+
+        // Disable: mirror flips to OFF, hook removed and ownership released.
+        controller.disableCapture();
+        CHECK(! ui.enabled);
+        CHECK(hookUninstalls == 1);
+        CHECK(ownershipReleases == 1);
+
+        // Ownership conflict: stays OFF, reason reported, no hook installed.
+        ui.clear();
+        ownershipAvailable = false;
+        CHECK(! controller.enableCapture());
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(! ui.enabled);
+        CHECK(ui.lastFailReason == tf::kb::FailReason::ownershipConflict);
+        CHECK(hookUninstalls == 1);   // no hook install was even attempted
+
+        // Hook-install failure: ownership was acquired then released, reason reported.
+        ui.clear();
+        ownershipAvailable = true;
+        hookInstallOk = false;
+        CHECK(! controller.enableCapture());
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(! ui.enabled);
+        CHECK(ui.lastFailReason == tf::kb::FailReason::hookInstallFailed);
+        CHECK(ownershipReleases == 2);   // just-acquired ownership released again
+
+        // Recovery: a later enable works and reports ON.
+        ui.clear();
+        hookInstallOk = true;
+        CHECK(controller.enableCapture());
+        CHECK(ui.enabled);
+        CHECK(controller.isCaptureEnabled());
+        controller.disableCapture();
+        CHECK(! ui.enabled);
+    }
+
     std::printf("%d checks, %d failure(s)\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }

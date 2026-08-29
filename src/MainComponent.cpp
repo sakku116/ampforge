@@ -228,7 +228,8 @@ MainComponent::MainComponent()
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton,
-                     &clearMapsButton })
+                     &clearMapsButton,
+                     &globalKeysButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -241,6 +242,15 @@ MainComponent::MainComponent()
     renameTemplateButton .setColour(juce::TextButton::textColourOffId, tf::colour::textDim);
     deleteTemplateButton .setColour(juce::TextButton::textColourOffId, tf::colour::danger);
     clearMapsButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
+
+    // Global Keys toggle: session-only, always starts OFF (UC-16). Amber while on
+    // (UC-15); the initial styling call also keeps the button's toggle state in sync
+    // with the controller (both start false).
+    globalKeysButton.setTooltip("Global Keyboard Capture — mapped keys work while Amp Forge\n"
+                                "is unfocused and are suppressed from other apps.\n"
+                                "Ctrl+Shift+F11 disables capture from anywhere.\n"
+                                "Session-only: always starts OFF and is never saved.");
+    setGlobalKeysUi(false);
 
     templateSelector.setTextWhenNothingSelected("(no templates)");
     templateSelector.onChange = [this]
@@ -261,6 +271,14 @@ MainComponent::MainComponent()
     controllerStatusLabel.setJustificationType(juce::Justification::centredRight);
     controllerStatusLabel.setText("Controller: Disconnected", juce::dontSendNotification);
     addAndMakeVisible(controllerStatusLabel);
+
+    // Short visible reason when Global Keys activation fails (another instance owns
+    // capture / hook install failed). Empty by default; filled by the status flow.
+    globalKeysStatusLabel.setFont(juce::FontOptions(12.0f));
+    globalKeysStatusLabel.setColour(juce::Label::textColourId, tf::colour::warn);
+    globalKeysStatusLabel.setJustificationType(juce::Justification::centredLeft);
+    globalKeysStatusLabel.setText({}, juce::dontSendNotification);
+    addAndMakeVisible(globalKeysStatusLabel);
 
     templateDirtyLabel.setText(juce::String::fromUTF8("\xe2\x97\x8f modified"), juce::dontSendNotification);
     templateDirtyLabel.setFont(juce::FontOptions(12.5f, juce::Font::bold));
@@ -386,10 +404,30 @@ MainComponent::MainComponent()
     });
     keyboardController.setStatusCallback([this](bool enabled, int failReason)
     {
-        keyboardCaptureEnabled.store(enabled);
-        if (! enabled && failReason != tf::kb::FailReason::none)
-            HostDebug::log("Global Keyboard Capture: activation failed (reason "
-                           + juce::String(failReason) + ")");
+        // The controller reports capture-mode changes (enable/disable) and activation
+        // failures through this existing status mirror. Both can fire on the hook
+        // thread (the Ctrl+Shift+F11 escape path) so the UI is updated on the message
+        // thread; the toggle state and the short failure reason stay in sync with the
+        // controller and are never persisted (session-only, UC-16/17).
+        juce::MessageManager::callAsync([this, enabled, failReason]
+        {
+            setGlobalKeysUi(enabled);
+
+            if (! enabled && failReason == tf::kb::FailReason::ownershipConflict)
+            {
+                globalKeysStatusLabel.setText("Another instance owns capture", juce::dontSendNotification);
+                HostDebug::log("Global Keyboard Capture: another instance owns capture");
+            }
+            else if (! enabled && failReason == tf::kb::FailReason::hookInstallFailed)
+            {
+                globalKeysStatusLabel.setText("Hook install failed", juce::dontSendNotification);
+                HostDebug::log("Global Keyboard Capture: Windows refused the hook");
+            }
+            else
+            {
+                globalKeysStatusLabel.setText({}, juce::dontSendNotification);
+            }
+        });
     });
 
     // Controller Bridge (#11): the host-side seam that mirrors learned Stomp/Preset
@@ -466,6 +504,7 @@ MainComponent::~MainComponent()
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton, &clearMapsButton,
+                     &globalKeysButton,
                      &chainViewToggleButton })
         b->removeListener(this);
 
@@ -601,6 +640,8 @@ void MainComponent::resized()
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
         learnExprButton    .setBounds(controlRow.removeFromLeft(110)); controlRow.removeFromLeft(5);
         clearMapsButton    .setBounds(controlRow.removeFromLeft(80));  controlRow.removeFromLeft(8);
+        globalKeysButton   .setBounds(controlRow.removeFromLeft(118)); controlRow.removeFromLeft(6);
+        globalKeysStatusLabel.setBounds(controlRow.removeFromLeft(170));
         controllerStatusLabel.setBounds(controlRow.removeFromRight(190));
         controlLabel       .setBounds(controlRow);
     }
@@ -707,6 +748,44 @@ void MainComponent::buttonClicked(juce::Button* button)
         return;
     }
     if (button == &clearMapsButton)    { clearMappings();     return; }
+
+    // Global Keys toggle: explicitly enters / leaves Global Keyboard Capture. The
+    // controller drives the button's toggle state through its status callback, so a
+    // failed activation (ownership conflict / hook failure) leaves the button visibly
+    // OFF with the short reason shown next to it.
+    if (button == &globalKeysButton)   { toggleGlobalKeys(); return; }
+}
+
+void MainComponent::toggleGlobalKeys()
+{
+    // The button click is processed on the message thread. If capture is currently on
+    // the user is turning it off; otherwise enable it (ownership + hook are acquired
+    // inside enableCapture, which reports failures through the status callback).
+    if (keyboardController.isCaptureEnabled())
+        keyboardController.disableCapture();
+    else
+        keyboardController.enableCapture();
+}
+
+void MainComponent::setGlobalKeysUi(bool enabled)
+{
+    // Exact wording from UC-14 and amber emphasis while on (UC-15). The toggle state
+    // drives the theme's buttonOnColourId/textColourOnId, so the amber fill + dark
+    // text appear together; while off the colours are removed so the button returns
+    // to its normal surface (same revert pattern as setTemplateDirty).
+    globalKeysButton.setToggleState(enabled, juce::dontSendNotification);
+    globalKeysButton.setButtonText(enabled ? "Global Keys: ON" : "Global Keys: OFF");
+
+    if (enabled)
+    {
+        globalKeysButton.setColour(juce::TextButton::buttonOnColourId, tf::colour::warn);
+        globalKeysButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+    }
+    else
+    {
+        globalKeysButton.removeColour(juce::TextButton::buttonOnColourId);
+        globalKeysButton.removeColour(juce::TextButton::textColourOnId);
+    }
 }
 
 void MainComponent::handleControlMidi(const juce::MidiMessage& message, const juce::String& sourceDeviceName)

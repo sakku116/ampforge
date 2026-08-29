@@ -113,6 +113,8 @@ Preset v2 is `<TONEFORGE_PRESET version="2">` containing `SECTION` and `SLOT` no
 - The user performs pushes; run `git push` only when explicitly asked. Ask before deleting files or branches.
 - `main` is protected. Work reaches it only through a PR; never push to it directly.
 - Cut `feature/*` or `fix/*` from `dev`, open a PR into `dev`, then open `dev` into `main` for releases.
+- Close an issue when its implementation PR has merged into `dev`. Use a GitHub Milestone (for example, `v0.3.1`) to show the target release; do not use triage labels for release status.
+- Close the release milestone only after its `dev` to `main` release PR has merged and the version tag has been pushed.
 
 ```bash
 git checkout dev && git pull

@@ -15,6 +15,13 @@ Infer the repository from the current Git remote.
 
 **PRs as a request surface: no.**
 
+## Release tracking
+
+- Close an issue when its implementation PR merges into `dev`.
+- Assign the issue a GitHub Milestone for its intended release; milestones distinguish merged-but-unreleased work from released work.
+- Use the five triage labels only for the state of open work. Do not use them as release-status labels.
+- Close a release milestone after its release PR merges into `main` and the version tag is pushed.
+
 ## Skill vocabulary
 
 “Publish to the issue tracker” means create a GitHub issue. “Fetch the relevant ticket” means run `gh issue view <number> --comments`.

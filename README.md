@@ -45,7 +45,7 @@ The main things that made it worth building:
 **Live performance**
 - Templates — save and recall named chain configurations (think "verse", "chorus", "lead")
 - MIDI control mapping — bind any note, CC, or program change to a bypass toggle or preset switch
-- Keyboard shortcuts — same bindings, no MIDI hardware required
+- Keyboard controls — local shortcuts plus optional Global Keys capture for mapped bare keys outside the app
 - Expression pedal — map a MIDI CC to any plugin parameter
 
 **Audio**

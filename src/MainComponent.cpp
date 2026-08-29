@@ -167,7 +167,10 @@ MainComponent::MainComponent()
             if (binding.action.index == slotId &&
                 (binding.action.type == ControlAction::Type::toggleBypass ||
                  binding.action.type == ControlAction::Type::activatePresetSlot))
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
                 controlMap.removeBinding(b);
+            }
         }
         saveControlMap();
         updateControlLabel();
@@ -225,7 +228,8 @@ MainComponent::MainComponent()
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton,
-                     &clearMapsButton })
+                     &clearMapsButton,
+                     &globalKeysButton })
     {
         b->addListener(this);
         addAndMakeVisible(*b);
@@ -238,6 +242,15 @@ MainComponent::MainComponent()
     renameTemplateButton .setColour(juce::TextButton::textColourOffId, tf::colour::textDim);
     deleteTemplateButton .setColour(juce::TextButton::textColourOffId, tf::colour::danger);
     clearMapsButton.setColour(juce::TextButton::textColourOffId, tf::colour::danger);
+
+    // Global Keys toggle: session-only, always starts OFF (UC-16). Amber while on
+    // (UC-15); the initial styling call also keeps the button's toggle state in sync
+    // with the controller (both start false).
+    globalKeysButton.setTooltip("Global Keyboard Capture — mapped keys work while Amp Forge\n"
+                                "is unfocused and are suppressed from other apps.\n"
+                                "Ctrl+Shift+F11 disables capture from anywhere.\n"
+                                "Session-only: always starts OFF and is never saved.");
+    setGlobalKeysUi(false);
 
     templateSelector.setTextWhenNothingSelected("(no templates)");
     templateSelector.onChange = [this]
@@ -258,6 +271,14 @@ MainComponent::MainComponent()
     controllerStatusLabel.setJustificationType(juce::Justification::centredRight);
     controllerStatusLabel.setText("Controller: Disconnected", juce::dontSendNotification);
     addAndMakeVisible(controllerStatusLabel);
+
+    // Short visible reason when Global Keys activation fails (another instance owns
+    // capture / hook install failed). Empty by default; filled by the status flow.
+    globalKeysStatusLabel.setFont(juce::FontOptions(12.0f));
+    globalKeysStatusLabel.setColour(juce::Label::textColourId, tf::colour::warn);
+    globalKeysStatusLabel.setJustificationType(juce::Justification::centredLeft);
+    globalKeysStatusLabel.setText({}, juce::dontSendNotification);
+    addAndMakeVisible(globalKeysStatusLabel);
 
     templateDirtyLabel.setText(juce::String::fromUTF8("\xe2\x97\x8f modified"), juce::dontSendNotification);
     templateDirtyLabel.setFont(juce::FontOptions(12.5f, juce::Font::bold));
@@ -342,6 +363,73 @@ MainComponent::MainComponent()
         handleControlMidi(m, src);
     };
 
+    // Global Keyboard Capture (Ticket 17.2): the Win32 adapter owns the hook; the
+    // controller owns capture policy. The adapter's event sink runs on the hook
+    // thread — it must stay bounded and non-blocking. The controller is lock-guarded
+    // and its decision is computed there; all app work (actions, learn, status) is
+    // deferred to the message thread in the callbacks below.
+    keyboardAdapter.setEventSink([this](const tf::kb::KeyEvent& event) -> bool
+    {
+        return keyboardController.handleKeyEvent(event);
+    });
+
+    keyboardController.setOwnershipProvider([this] { return keyboardAdapter.acquireOwnership(); });
+    keyboardController.setOwnershipReleaseCallback([this] { keyboardAdapter.releaseOwnership(); });
+    keyboardController.setHookInstallProvider([this] { return keyboardAdapter.install(); });
+    keyboardController.setHookUninstallCallback([this] { keyboardAdapter.uninstall(); });
+    keyboardController.setControlMapProvider([this]
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        return controlMap;
+    });
+    keyboardController.setLearnArmedProvider([this] { return midiLearnArmed.load(); });
+
+    // All controller callbacks can fire on the hook thread (global events) or the
+    // message thread (local enable/disable). Defer app work to the message thread
+    // unconditionally so it is never executed from the hook callback.
+    keyboardController.setLearnCallback([this](const ControlTrigger& trigger)
+    {
+        const auto action = pendingLearnAction;
+        juce::MessageManager::callAsync([this, trigger, action]
+        {
+            bindingLearnComplete(trigger, action);
+        });
+    });
+    keyboardController.setActionCallback([this](const ControlAction& action)
+    {
+        juce::MessageManager::callAsync([this, action]
+        {
+            executeAction(action);
+        });
+    });
+    keyboardController.setStatusCallback([this](bool enabled, int failReason)
+    {
+        // The controller reports capture-mode changes (enable/disable) and activation
+        // failures through this existing status mirror. Both can fire on the hook
+        // thread (the Ctrl+Shift+F11 escape path) so the UI is updated on the message
+        // thread; the toggle state and the short failure reason stay in sync with the
+        // controller and are never persisted (session-only, UC-16/17).
+        juce::MessageManager::callAsync([this, enabled, failReason]
+        {
+            setGlobalKeysUi(enabled);
+
+            if (! enabled && failReason == tf::kb::FailReason::ownershipConflict)
+            {
+                globalKeysStatusLabel.setText("Another instance owns capture", juce::dontSendNotification);
+                HostDebug::log("Global Keyboard Capture: another instance owns capture");
+            }
+            else if (! enabled && failReason == tf::kb::FailReason::hookInstallFailed)
+            {
+                globalKeysStatusLabel.setText("Hook install failed", juce::dontSendNotification);
+                HostDebug::log("Global Keyboard Capture: Windows refused the hook");
+            }
+            else
+            {
+                globalKeysStatusLabel.setText({}, juce::dontSendNotification);
+            }
+        });
+    });
+
     // Controller Bridge (#11): the host-side seam that mirrors learned Stomp/Preset
     // assignments to a paired Bluetooth MIDI controller and feeds it snapshots/updates.
     controllerBridge.setSendCallback([this](const juce::MidiMessage& message)
@@ -365,12 +453,19 @@ MainComponent::MainComponent()
 
         // Restore scenes first so we know whether an active scene should own the chain.
         restoreTemplates();
-        restoreControlMap();
 
         const int activeScene = templateManager.getCurrentIndex();
 
         if (juce::isPositiveAndBelow(activeScene, templateManager.getNumScenes()))
         {
+            // A template owns its bindings. Do not replace them with the legacy
+            // standalone map, which may have been saved while another template was active.
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap = templateManager.getScene(activeScene).controlMap;
+            }
+            updateControlLabel();
+
             // Active scene takes priority: load async so the UI stays responsive.
             const auto& scene = templateManager.getScene(activeScene);
             setChainLoading(true, 0, scene.specs.size());
@@ -389,6 +484,8 @@ MainComponent::MainComponent()
         }
         else
         {
+            // Retain mappings created before templates existed.
+            restoreControlMap();
             // No active scene — fall back to last saved preset.
             tryRestoreLastPreset();
         }
@@ -397,6 +494,15 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+
+    // Global Keyboard Capture teardown: the controller releases ownership and the
+    // adapter removes the hook, so normal keyboard behavior is restored even if
+    // capture was left enabled (US-28). The hook thread is joined before the
+    // adapter/controller members are destroyed so no hook event can be in flight.
+    keyboardController.disableCapture();
+    waitForKeyboardHookExit();
+    keyboardAdapter.releaseOwnership();
+
     HostDebug::log("MainComponent destroying");
 
     stopTimer();
@@ -407,6 +513,7 @@ MainComponent::~MainComponent()
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
                      &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton, &clearMapsButton,
+                     &globalKeysButton,
                      &chainViewToggleButton })
         b->removeListener(this);
 
@@ -542,6 +649,8 @@ void MainComponent::resized()
         controlSectionLabel.setBounds(controlRow.removeFromLeft(70));
         learnExprButton    .setBounds(controlRow.removeFromLeft(110)); controlRow.removeFromLeft(5);
         clearMapsButton    .setBounds(controlRow.removeFromLeft(80));  controlRow.removeFromLeft(8);
+        globalKeysButton   .setBounds(controlRow.removeFromLeft(118)); controlRow.removeFromLeft(6);
+        globalKeysStatusLabel.setBounds(controlRow.removeFromLeft(170));
         controllerStatusLabel.setBounds(controlRow.removeFromRight(190));
         controlLabel       .setBounds(controlRow);
     }
@@ -648,6 +757,44 @@ void MainComponent::buttonClicked(juce::Button* button)
         return;
     }
     if (button == &clearMapsButton)    { clearMappings();     return; }
+
+    // Global Keys toggle: explicitly enters / leaves Global Keyboard Capture. The
+    // controller drives the button's toggle state through its status callback, so a
+    // failed activation (ownership conflict / hook failure) leaves the button visibly
+    // OFF with the short reason shown next to it.
+    if (button == &globalKeysButton)   { toggleGlobalKeys(); return; }
+}
+
+void MainComponent::toggleGlobalKeys()
+{
+    // The button click is processed on the message thread. If capture is currently on
+    // the user is turning it off; otherwise enable it (ownership + hook are acquired
+    // inside enableCapture, which reports failures through the status callback).
+    if (keyboardController.isCaptureEnabled())
+        keyboardController.disableCapture();
+    else
+        keyboardController.enableCapture();
+}
+
+void MainComponent::setGlobalKeysUi(bool enabled)
+{
+    // Exact wording from UC-14 and amber emphasis while on (UC-15). The toggle state
+    // drives the theme's buttonOnColourId/textColourOnId, so the amber fill + dark
+    // text appear together; while off the colours are removed so the button returns
+    // to its normal surface (same revert pattern as setTemplateDirty).
+    globalKeysButton.setToggleState(enabled, juce::dontSendNotification);
+    globalKeysButton.setButtonText(enabled ? "Global Keys: ON" : "Global Keys: OFF");
+
+    if (enabled)
+    {
+        globalKeysButton.setColour(juce::TextButton::buttonOnColourId, tf::colour::warn);
+        globalKeysButton.setColour(juce::TextButton::textColourOnId, juce::Colours::black);
+    }
+    else
+    {
+        globalKeysButton.removeColour(juce::TextButton::buttonOnColourId);
+        globalKeysButton.removeColour(juce::TextButton::textColourOnId);
+    }
 }
 
 void MainComponent::handleControlMidi(const juce::MidiMessage& message, const juce::String& sourceDeviceName)
@@ -670,7 +817,10 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message, const ju
 
         juce::MessageManager::callAsync([this, chan, cc, slot, param]
         {
-            controlMap.addExpression({ chan, cc, slot, param });
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap.addExpression({ chan, cc, slot, param });
+            }
             saveControlMap();
             HostDebug::log("Expression learn: CC " + juce::String(cc)
                            + " -> slot " + juce::String(slot + 1) + " param " + juce::String(param));
@@ -714,6 +864,13 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
     const int code = key.getKeyCode();
 
+    // While Global Keyboard Capture is enabled the hook is authoritative: a bare
+    // mapped key the hook captured is consumed here so one physical press produces
+    // one action (US-24). Unmapped keys and hook-passed-through keys (modified
+    // chords) keep their normal local behavior.
+    if (keyboardController.handleLocalKeyPress(key))
+        return true;
+
     if (midiLearnArmed.load())
     {
         ControlTrigger trigger;
@@ -733,6 +890,15 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 
     executeAction(action);   // already on the message thread
     return true;
+}
+
+
+void MainComponent::waitForKeyboardHookExit()
+{
+    // Message-thread teardown only. The hook thread owns its own lifetime and detaches
+    // itself, so this just signals it to stop and waits for it to exit (it cannot be
+    // running app work: everything it does is deferred to the message thread).
+    keyboardAdapter.waitForHookExit();
 }
 
 void MainComponent::executeAction(const ControlAction& action)
@@ -760,10 +926,17 @@ void MainComponent::executeAction(const ControlAction& action)
 void MainComponent::captureTemplate()
 {
     const auto name = "Template " + juce::String(templateManager.getNumScenes() + 1);
-    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
+    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs());
     templateManager.setCurrentIndex(idx);
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap.clear();
+    }
     refreshTemplateSelector();
     saveTemplates();
+    saveControlMap();
+    updateControlLabel();
+    refreshChainList();
     setTemplateDirty(false);
     HostDebug::log("Template captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
 }
@@ -775,7 +948,12 @@ void MainComponent::updateTemplate()
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
         return;
 
-    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
+    ControlMap mapCopy;
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        mapCopy = controlMap;
+    }
+    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), mapCopy);
     saveTemplates();
     setTemplateDirty(false);
     HostDebug::log("Template updated: index " + juce::String(idx));
@@ -838,7 +1016,10 @@ void MainComponent::recallTemplate(int index)
     const auto& scene = templateManager.getScene(index);
 
     // Apply the template's own control map immediately.
-    controlMap = scene.controlMap;
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap = scene.controlMap;
+    }
     saveControlMap();
     updateControlLabel();
 
@@ -914,11 +1095,25 @@ void MainComponent::restoreTemplates()
 void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const ControlAction& action)
 {
     // Check for an existing binding on the same trigger and ask before overwriting.
-    for (int b = 0; b < controlMap.getNumBindings(); ++b)
+    for (int b = controlMap.getNumBindings() - 1; b >= 0; --b)
     {
         if (controlMap.getBinding(b).trigger.matches(trigger))
         {
             const auto existing = controlMap.getBinding(b).action;
+
+            const bool targetsRemovedSlot =
+                (existing.type == ControlAction::Type::toggleBypass
+                 || existing.type == ControlAction::Type::activatePresetSlot)
+                && findSlotIndexById(existing.index) < 0;
+
+            if (targetsRemovedSlot)
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap.removeBinding(b);
+                HostDebug::log("Learn: removed stale " + trigger.toString());
+                continue;
+            }
+
             auto* dlg = new juce::AlertWindow("Duplicate Binding",
                 trigger.toString() + " is already mapped to:\n[" + existing.toString()
                 + "]\n\nOverwrite with [" + action.toString() + "]?",
@@ -930,8 +1125,11 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
                 {
                     if (result == 1)
                     {
-                        controlMap.removeBinding(b);
-                        controlMap.addBinding({ trigger, action });
+                        {
+                            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                            controlMap.removeBinding(b);
+                            controlMap.addBinding({ trigger, action });
+                        }
                         saveControlMap();
                         updateControlLabel();
                         refreshChainList();
@@ -944,7 +1142,10 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
         }
     }
 
-    controlMap.addBinding({ trigger, action });
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap.addBinding({ trigger, action });
+    }
     saveControlMap();
     updateControlLabel();
     refreshChainList();
@@ -973,7 +1174,10 @@ void MainComponent::armExpressionLearn(int slotIndex, int paramIndex)
 
 void MainComponent::clearMappings()
 {
-    controlMap.clear();
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap.clear();
+    }
     midiLearnArmed.store(false);
     expressionLearnArmed.store(false);
     saveControlMap();
@@ -1111,7 +1315,12 @@ void MainComponent::saveControlMap()
 {
     if (auto* settings = appProperties.getUserSettings())
     {
-        if (auto xml = controlMap.toValueTree().createXml())
+        juce::ValueTree tree;
+        {
+            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            tree = controlMap.toValueTree();
+        }
+        if (auto xml = tree.createXml())
             settings->setValue(controlMapStateKey, xml.get());
 
         settings->saveIfNeeded();
@@ -1127,7 +1336,10 @@ void MainComponent::restoreControlMap()
 
     if (auto xml = settings->getXmlValue(controlMapStateKey))
     {
-        controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        {
+            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        }
         updateControlLabel();
         HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
     }

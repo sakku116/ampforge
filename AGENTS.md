@@ -53,6 +53,7 @@ Runtime data lives in `%APPDATA%\AmpForge\`: `host.log`, `presets/*.tfpreset`, s
 | Hosting | `PluginHost.*`, `PluginChain.*` | Formats, instances, editors, chain snapshots, crossfade, sections, bypass, stable slot identity |
 | Scanning | `PluginScanner.*`, `ScanSubprocess.*`, `PluginScanGuard.*` | Plugin discovery, cache, worker subprocess, Windows SEH load guard |
 | Persistence | `Preset.*`, `TemplateManager.*`, `ControlMap.*` | Presets, named chain templates, trigger/action and expression mappings |
+| Keyboard capture | `KeyboardControlController.*`, `KeyboardCaptureAdapter.*` | Session-global keyboard policy, Win32 hook translation, exclusive ownership, and message-thread action delivery |
 | Chain UI | `ChainListBox.*` | Vertical rows and horizontal columns, section/slot interactions, levels, volume controls |
 | Theme and logs | `ToneForgeLookAndFeel.*`, `HostDebug.h` | `tf::colour` stage palette and `[AmpForge]` logger |
 
@@ -81,6 +82,7 @@ Runtime data lives in `%APPDATA%\AmpForge\`: `host.log`, `presets/*.tfpreset`, s
 - The chain supports Stomp and Preset sections; slot add, remove, duplicate, rename, reorder, drag across sections, section rename/reorder, confirmed section removal, bypass, plugin editors, and per-slot/section volume.
 - Templates capture and recall chain snapshots with dirty tracking. Presets save and load `.tfpreset` files.
 - MIDI notes, CC, programs, and keys can trigger template navigation/loading, slot bypass, or preset activation. Expression CC maps to parameters. Key labels use `juce::KeyPress(number).getTextDescription()`.
+- Global Keys optionally captures mapped bare physical keys while Amp Forge is unfocused; it starts off each session, leaves unmapped and modified keys alone, and Ctrl+Shift+F11 disables it.
 - Slot context menus provide editor, duplicate, learn control, rename/reset name, and remove. Slot badges are the bypass/activate control: process them in `mouseDown`, including inside the horizontal-view viewport.
 - Badge states: active stomp light blue, bypassed stomp amber, active preset teal, inactive preset dim outline. Assigned controls appear on the badge. Preset rows use `surface2`; section headers distinguish preset sections with amber.
 - Section peak meters appear only in vertical view. `LevelMeterBar` compact mode removes its label row for the footer meters. The footer has compact preset, template, master, and control rows; master sliders reset to 1.0 on double-click.

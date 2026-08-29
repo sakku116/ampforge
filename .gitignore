@@ -128,7 +128,9 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
-.github/
+# GitHub automation is local-only except the shared PR template.
+.github/*
+!.github/pull_request_template.md
 agent/
 
 # Optional dependencies

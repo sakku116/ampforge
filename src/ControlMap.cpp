@@ -1,5 +1,7 @@
 #include "ControlMap.h"
 
+#include <algorithm>
+
 bool ControlTrigger::matches(const ControlTrigger& incoming) const
 {
     if (type != incoming.type)
@@ -65,6 +67,21 @@ void ControlMap::removeBinding(int index)
 void ControlMap::clear()
 {
     bindings.clear();
+}
+
+int ControlMap::removeInvalidSlotBindings(const juce::Array<int>& validSlotIds)
+{
+    const auto before = bindings.size();
+
+    std::erase_if(bindings, [&validSlotIds](const ControlBinding& binding)
+    {
+        const auto type = binding.action.type;
+        const bool isSlotAction = type == ControlAction::Type::toggleBypass
+                               || type == ControlAction::Type::activatePresetSlot;
+        return isSlotAction && ! validSlotIds.contains(binding.action.index);
+    });
+
+    return (int) (before - bindings.size());
 }
 
 ControlTrigger ControlMap::triggerFromMidi(const juce::MidiMessage& message)

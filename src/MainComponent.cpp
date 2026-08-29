@@ -167,7 +167,10 @@ MainComponent::MainComponent()
             if (binding.action.index == slotId &&
                 (binding.action.type == ControlAction::Type::toggleBypass ||
                  binding.action.type == ControlAction::Type::activatePresetSlot))
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
                 controlMap.removeBinding(b);
+            }
         }
         saveControlMap();
         updateControlLabel();
@@ -342,6 +345,53 @@ MainComponent::MainComponent()
         handleControlMidi(m, src);
     };
 
+    // Global Keyboard Capture (Ticket 17.2): the Win32 adapter owns the hook; the
+    // controller owns capture policy. The adapter's event sink runs on the hook
+    // thread — it must stay bounded and non-blocking. The controller is lock-guarded
+    // and its decision is computed there; all app work (actions, learn, status) is
+    // deferred to the message thread in the callbacks below.
+    keyboardAdapter.setEventSink([this](const tf::kb::KeyEvent& event) -> bool
+    {
+        return keyboardController.handleKeyEvent(event);
+    });
+
+    keyboardController.setOwnershipProvider([this] { return keyboardAdapter.acquireOwnership(); });
+    keyboardController.setOwnershipReleaseCallback([this] { keyboardAdapter.releaseOwnership(); });
+    keyboardController.setHookInstallProvider([this] { return keyboardAdapter.install(); });
+    keyboardController.setHookUninstallCallback([this] { keyboardAdapter.uninstall(); });
+    keyboardController.setControlMapProvider([this]
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        return controlMap;
+    });
+    keyboardController.setLearnArmedProvider([this] { return midiLearnArmed.load(); });
+
+    // All controller callbacks can fire on the hook thread (global events) or the
+    // message thread (local enable/disable). Defer app work to the message thread
+    // unconditionally so it is never executed from the hook callback.
+    keyboardController.setLearnCallback([this](const ControlTrigger& trigger)
+    {
+        const auto action = pendingLearnAction;
+        juce::MessageManager::callAsync([this, trigger, action]
+        {
+            bindingLearnComplete(trigger, action);
+        });
+    });
+    keyboardController.setActionCallback([this](const ControlAction& action)
+    {
+        juce::MessageManager::callAsync([this, action]
+        {
+            executeAction(action);
+        });
+    });
+    keyboardController.setStatusCallback([this](bool enabled, int failReason)
+    {
+        keyboardCaptureEnabled.store(enabled);
+        if (! enabled && failReason != tf::kb::FailReason::none)
+            HostDebug::log("Global Keyboard Capture: activation failed (reason "
+                           + juce::String(failReason) + ")");
+    });
+
     // Controller Bridge (#11): the host-side seam that mirrors learned Stomp/Preset
     // assignments to a paired Bluetooth MIDI controller and feeds it snapshots/updates.
     controllerBridge.setSendCallback([this](const juce::MidiMessage& message)
@@ -397,6 +447,15 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+
+    // Global Keyboard Capture teardown: the controller releases ownership and the
+    // adapter removes the hook, so normal keyboard behavior is restored even if
+    // capture was left enabled (US-28). The hook thread is joined before the
+    // adapter/controller members are destroyed so no hook event can be in flight.
+    keyboardController.disableCapture();
+    waitForKeyboardHookExit();
+    keyboardAdapter.releaseOwnership();
+
     HostDebug::log("MainComponent destroying");
 
     stopTimer();
@@ -670,7 +729,10 @@ void MainComponent::handleControlMidi(const juce::MidiMessage& message, const ju
 
         juce::MessageManager::callAsync([this, chan, cc, slot, param]
         {
-            controlMap.addExpression({ chan, cc, slot, param });
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap.addExpression({ chan, cc, slot, param });
+            }
             saveControlMap();
             HostDebug::log("Expression learn: CC " + juce::String(cc)
                            + " -> slot " + juce::String(slot + 1) + " param " + juce::String(param));
@@ -714,6 +776,13 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
     const int code = key.getKeyCode();
 
+    // While Global Keyboard Capture is enabled the hook is authoritative: a bare
+    // mapped key the hook captured is consumed here so one physical press produces
+    // one action (US-24). Unmapped keys and hook-passed-through keys (modified
+    // chords) keep their normal local behavior.
+    if (keyboardController.handleLocalKeyPress(key))
+        return true;
+
     if (midiLearnArmed.load())
     {
         ControlTrigger trigger;
@@ -733,6 +802,15 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 
     executeAction(action);   // already on the message thread
     return true;
+}
+
+
+void MainComponent::waitForKeyboardHookExit()
+{
+    // Message-thread teardown only. The hook thread owns its own lifetime and detaches
+    // itself, so this just signals it to stop and waits for it to exit (it cannot be
+    // running app work: everything it does is deferred to the message thread).
+    keyboardAdapter.waitForHookExit();
 }
 
 void MainComponent::executeAction(const ControlAction& action)
@@ -760,7 +838,12 @@ void MainComponent::executeAction(const ControlAction& action)
 void MainComponent::captureTemplate()
 {
     const auto name = "Template " + juce::String(templateManager.getNumScenes() + 1);
-    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
+    ControlMap mapCopy;
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        mapCopy = controlMap;
+    }
+    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs(), mapCopy);
     templateManager.setCurrentIndex(idx);
     refreshTemplateSelector();
     saveTemplates();
@@ -775,7 +858,12 @@ void MainComponent::updateTemplate()
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
         return;
 
-    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), controlMap);
+    ControlMap mapCopy;
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        mapCopy = controlMap;
+    }
+    templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), mapCopy);
     saveTemplates();
     setTemplateDirty(false);
     HostDebug::log("Template updated: index " + juce::String(idx));
@@ -838,7 +926,10 @@ void MainComponent::recallTemplate(int index)
     const auto& scene = templateManager.getScene(index);
 
     // Apply the template's own control map immediately.
-    controlMap = scene.controlMap;
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap = scene.controlMap;
+    }
     saveControlMap();
     updateControlLabel();
 
@@ -930,8 +1021,11 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
                 {
                     if (result == 1)
                     {
-                        controlMap.removeBinding(b);
-                        controlMap.addBinding({ trigger, action });
+                        {
+                            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                            controlMap.removeBinding(b);
+                            controlMap.addBinding({ trigger, action });
+                        }
                         saveControlMap();
                         updateControlLabel();
                         refreshChainList();
@@ -944,7 +1038,10 @@ void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const Co
         }
     }
 
-    controlMap.addBinding({ trigger, action });
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap.addBinding({ trigger, action });
+    }
     saveControlMap();
     updateControlLabel();
     refreshChainList();
@@ -973,7 +1070,10 @@ void MainComponent::armExpressionLearn(int slotIndex, int paramIndex)
 
 void MainComponent::clearMappings()
 {
-    controlMap.clear();
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap.clear();
+    }
     midiLearnArmed.store(false);
     expressionLearnArmed.store(false);
     saveControlMap();
@@ -1111,7 +1211,12 @@ void MainComponent::saveControlMap()
 {
     if (auto* settings = appProperties.getUserSettings())
     {
-        if (auto xml = controlMap.toValueTree().createXml())
+        juce::ValueTree tree;
+        {
+            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            tree = controlMap.toValueTree();
+        }
+        if (auto xml = tree.createXml())
             settings->setValue(controlMapStateKey, xml.get());
 
         settings->saveIfNeeded();
@@ -1127,7 +1232,10 @@ void MainComponent::restoreControlMap()
 
     if (auto xml = settings->getXmlValue(controlMapStateKey))
     {
-        controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        {
+            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
+        }
         updateControlLabel();
         HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
     }

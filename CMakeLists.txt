@@ -42,6 +42,8 @@ target_sources(AmpForge
         src/ControlMap.cpp
         src/KeyboardControlController.h
         src/KeyboardControlController.cpp
+        src/KeyboardCaptureAdapter.h
+        src/KeyboardCaptureAdapter.cpp
         src/ControllerBridge.h
         src/ControllerBridge.cpp
         src/TemplateManager.h
@@ -142,6 +144,32 @@ target_link_libraries(AmpForgeKeyboardControlTests
     PRIVATE
         juce::juce_audio_basics
         juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
+# ---------------------------------------------------------------------------
+# Focused tests for the Win32 key-code translation behind Global Keyboard
+# Capture (Ticket 17.2). Pure translation (no hook, no device): pins native
+# VK_* values to the JUCE key-code space Local Keyboard Control persists.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeKeyboardAdapterTranslationTests
+    PRODUCT_NAME "AmpForgeKeyboardAdapterTranslationTests"
+)
+
+juce_generate_juce_header(AmpForgeKeyboardAdapterTranslationTests)
+
+target_sources(AmpForgeKeyboardAdapterTranslationTests
+    PRIVATE
+        tests/KeyboardAdapterTranslationTests.cpp
+        src/KeyboardCaptureAdapter.cpp
+)
+
+target_link_libraries(AmpForgeKeyboardAdapterTranslationTests
+    PRIVATE
+        juce::juce_gui_basics
+        juce::juce_audio_basics
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags

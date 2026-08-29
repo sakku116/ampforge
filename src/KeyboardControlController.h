@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include <functional>
+#include <mutex>
 
 #include "ControlMap.h"
 
@@ -74,12 +75,15 @@ public:
     KeyboardControlController() = default;
 
     /** Releases exclusive capture ownership if held, so teardown never leaves
-        cross-process interception active or a callback target dangling. */
+        cross-process interception active or a callback target dangling. If capture
+        was left enabled, disables it (unhook + release) before destruction. */
     ~KeyboardControlController();
 
     // ── boundaries (fakes in tests; the app wires real ones) ─────────────────
-    /** Provides the current active Control Map (owned by the active template). */
-    void setControlMapProvider(std::function<const ControlMap*()> provider);
+    /** Provides the current active Control Map (owned by the active template).
+        Returns a copy so the caller (the hook thread) never reads a map being
+        mutated by the message thread. */
+    void setControlMapProvider(std::function<ControlMap()> provider);
 
     /** Whether Learn Control is armed (the existing binding-completion flow). While
         armed, the next eligible physical bare key is consumed for learning instead of
@@ -107,6 +111,15 @@ public:
     /** Reports capture-mode changes and activation failures for the UI. */
     void setStatusCallback(std::function<void(bool enabled, int failReason)> callback);
 
+    /** Installs the OS capture hook (implemented by the Win32 adapter). Called on
+        enable after ownership is held. Returns false when Windows refuses the hook,
+        which leaves capture off with a visible failure reason. Tests inject a fake. */
+    void setHookInstallProvider(std::function<bool()> provider);
+
+    /** Removes the OS capture hook. Invoked on disableCapture() and from the
+        destructor, so teardown never leaves cross-process interception active. */
+    void setHookUninstallCallback(std::function<void()> callback);
+
     // ── session mode ─────────────────────────────────────────────────────────
     /** Attempts to enter Global Keyboard Capture. Returns false (and reports a
         failReason via the status callback) when ownership or hook activation fails. */
@@ -116,7 +129,7 @@ public:
     void disableCapture();
 
     /** True while Global Keyboard Capture is active (visible "Global Keys: ON"). */
-    bool isCaptureEnabled() const { return captureEnabled; }
+    bool isCaptureEnabled() const;
 
     // ── normalized input seam ────────────────────────────────────────────────
     /** Drives a normalized key event. Returns true when the event is consumed
@@ -136,15 +149,24 @@ private:
     bool handleUp(const tf::kb::KeyEvent& event);
     void releaseOwnership();
 
-    std::function<const ControlMap*()> controlMapProvider;
+    std::function<ControlMap()> controlMapProvider;
     std::function<bool()> learnArmedProvider;
     std::function<bool()> ownershipProvider;
     std::function<void()> ownershipReleaseCallback;
     std::function<void(const ControlAction&)> actionCallback;
     std::function<void(const ControlTrigger&)> learnCallback;
     std::function<void(bool, int)> statusCallback;
+    std::function<bool()> hookInstallProvider;
+    std::function<void()> hookUninstallCallback;
 
-    bool captureEnabled = false;
+    // Serializes the state machine across the hook thread (global events) and the
+    // message thread (local key presses, enable/disable). Recursive because the
+    // capture-escape path re-enters disableCapture() from handleDown().
+    std::recursive_mutex mutex;
+
+    // Atomic so isCaptureEnabled() can be read safely from the message thread (local
+    // key handling) while the hook thread disables capture via the escape chord.
+    std::atomic<bool> captureEnabled { false };
 
     // Captured physical presses: each emits once on its initial key-down, then its
     // auto-repeat key-downs and matching key-up stay consumed. Tracked per key and

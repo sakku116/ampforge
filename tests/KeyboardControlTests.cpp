@@ -117,7 +117,7 @@ int main()
         ControlMap map;
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
                          { ControlAction::Type::toggleBypass, 0 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         CHECK(controller.enableCapture());
         CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
@@ -141,7 +141,7 @@ int main()
         ControlMap map;
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
                          { ControlAction::Type::toggleBypass, 0 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         CHECK(controller.enableCapture());
 
@@ -182,7 +182,7 @@ int main()
         ControlMap map;
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
                          { ControlAction::Type::nextTemplate, 0 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         CHECK(controller.enableCapture());
         CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
@@ -215,7 +215,7 @@ int main()
         ControlMap map;
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
                          { ControlAction::Type::toggleBypass, 0 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         CHECK(controller.enableCapture());
 
@@ -284,7 +284,7 @@ int main()
         ControlMap map;
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
                          { ControlAction::Type::toggleBypass, 0 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         // activation failure: request is refused, state stays off, reason reported,
         // no actions emitted
@@ -318,7 +318,7 @@ int main()
             transient.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
             transient.setLearnCallback([&](const ControlTrigger&) {});
             transient.setStatusCallback([&](bool, int) {});
-            transient.setControlMapProvider([&] { return &map; });
+            transient.setControlMapProvider([&] { return map; });
             transient.setOwnershipProvider([&]
             {
                 if (owned > released)   // ownership held until released
@@ -390,7 +390,7 @@ int main()
         controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
         controller.setLearnCallback([&](const ControlTrigger&) {});
         controller.setStatusCallback([&](bool, int) {});
-        controller.setControlMapProvider([&] { return &restored; });
+        controller.setControlMapProvider([&] { return restored; });
 
         CHECK(controller.enableCapture());
         CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
@@ -419,7 +419,7 @@ int main()
                          { ControlAction::Type::toggleBypass, 0 } });
         map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F6Key },
                          { ControlAction::Type::toggleBypass, 1 } });
-        controller.setControlMapProvider([&] { return &map; });
+        controller.setControlMapProvider([&] { return map; });
 
         CHECK(controller.enableCapture());
 
@@ -444,6 +444,120 @@ int main()
         CHECK(! controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
         CHECK(! controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
         CHECK(actions.actions.size() == 2);
+    }
+
+    // ── Slice 9: hook activation failure leaves capture off and ownership released ──
+    {
+        FakeStatus status;
+        KeyboardControlController controller;
+        controller.setStatusCallback([&](bool enabled, int reason)
+        {
+            ++status.modeChanges;
+            if (! enabled && reason != 0)
+                status.lastFailedReason = reason;
+        });
+
+        bool ownershipAcquired = false;
+        bool hookInstallOk = false;
+        int hookUninstalls = 0;
+        int ownershipReleases = 0;
+        controller.setOwnershipProvider([&] { ownershipAcquired = true; return true; });
+        controller.setOwnershipReleaseCallback([&] { ++ownershipReleases; });
+        controller.setHookInstallProvider([&] { return hookInstallOk; });
+        controller.setHookUninstallCallback([&] { ++hookUninstalls; });
+
+        // hook install failure: capture stays off, ownership released, reason reported
+        CHECK(! controller.enableCapture());
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(status.lastFailedReason == tf::kb::FailReason::hookInstallFailed);
+        CHECK(ownershipReleases == 1);   // the just-acquired ownership was released
+
+        // hook install succeeds: capture on
+        hookInstallOk = true;
+        CHECK(controller.enableCapture());
+        CHECK(controller.isCaptureEnabled());
+        CHECK(ownershipAcquired);
+
+        // disable removes the hook and releases ownership
+        controller.disableCapture();
+        CHECK(hookUninstalls == 1);
+        CHECK(ownershipReleases == 2);
+        CHECK(! controller.isCaptureEnabled());
+    }
+
+    // ── Slice 10: S-2 escape chord is not a captured mapped press; S-3 uncaptured
+    // repeats never re-enter learn/map matching ───────────────────────────────
+    {
+        FakeActions actions;
+        FakeLearn learn;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger& t) { learn.triggers.add(t); });
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        controller.setControlMapProvider([&] { return map; });
+
+        CHECK(controller.enableCapture());
+
+        // S-2: the capture-escape chord (Ctrl+Shift+F11) disables capture and is
+        // consumed, but is NOT recorded as a captured mapped press. After it, a
+        // local JUCE delivery of the same F11 key is not consumed (the chord's
+        // key-up/repeat window is not locally reserved), and a bare F11 is not
+        // treated as an ongoing captured press.
+        CHECK(controller.isCaptureEnabled());
+        CHECK(controller.handleKeyEvent(modDown(juce::KeyPress::F11Key, tf::kb::modCtrl | tf::kb::modShift)));
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(actions.actions.isEmpty());
+        CHECK(learn.triggers.isEmpty());
+
+        // Capture is now off, so local F11 passes through (nothing consumed).
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F11Key)));
+        CHECK(actions.actions.isEmpty());
+
+        // Re-enable and press the escape chord again: still not captured, and the
+        // chord's matching key-up passes through (it was never recorded).
+        CHECK(controller.enableCapture());
+        CHECK(controller.handleKeyEvent(modDown(juce::KeyPress::F11Key, tf::kb::modCtrl | tf::kb::modShift)));
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(! controller.handleKeyEvent(up(juce::KeyPress::F11Key)));
+        CHECK(actions.actions.isEmpty());
+
+        // S-3: an uncaptured repeat never re-enters learn or map matching. Enable
+        // capture, then deliver a repeat for a key whose initial press was NOT
+        // captured (e.g. the hook passed it through because it was unmapped at the
+        // time). While learn is armed, the repeat must NOT emit a second learn
+        // trigger; with learn disarmed it must NOT execute the mapped action.
+        CHECK(controller.enableCapture());
+
+        bool learnArmed = true;
+        controller.setLearnArmedProvider([&] { return learnArmed; });
+
+        // Uncaptured repeat with learn armed: passes through, no learn trigger.
+        CHECK(! controller.handleKeyEvent(repeatDown(juce::KeyPress::F6Key)));
+        CHECK(learn.triggers.isEmpty());
+        CHECK(actions.actions.isEmpty());
+
+        // Uncaptured repeat with learn disarmed and the key NOW mapped: passes
+        // through, no action (the repeat must not execute a fresh mapping).
+        learnArmed = false;
+        CHECK(! controller.handleKeyEvent(repeatDown(juce::KeyPress::F5Key)));
+        CHECK(learn.triggers.isEmpty());
+        CHECK(actions.actions.isEmpty());
+
+        // Control: a genuine captured press still works (repeat of a captured key
+        // stays consumed, matching key-up consumed), so the new pass-through branch
+        // did not disturb the captured-press path.
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(controller.handleKeyEvent(repeatDown(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+
+        controller.disableCapture();
     }
 
     std::printf("%d checks, %d failure(s)\n", checks, failures);

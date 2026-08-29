@@ -7,6 +7,8 @@
 #include "PluginScanner.h"
 #include "ControlMap.h"
 #include "ControllerBridge.h"
+#include "KeyboardControlController.h"
+#include "KeyboardCaptureAdapter.h"
 #include "TemplateManager.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
@@ -413,6 +415,18 @@ private:
     std::atomic<bool> expressionLearnArmed { false };
     int pendingExprSlot = 0;
     int pendingExprParam = 0;
+
+    // ── Global Keyboard Capture (Ticket 17.2) ────────────────────────────────
+    KeyboardControlController keyboardController;
+    KeyboardCaptureAdapter keyboardAdapter;
+    std::atomic<bool> keyboardCaptureEnabled { false };   // mirror for the status flow
+
+    // Serializes the Control Map against the hook thread: the adapter's event sink
+    // runs on the hook thread and copies the map via the provider, so the copy must
+    // not race message-thread mutations (binding add/remove/clear, template recall).
+    std::recursive_mutex controlMapMutex;
+
+    void waitForKeyboardHookExit();   // message-thread teardown: join the hook thread
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;

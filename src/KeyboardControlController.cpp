@@ -22,7 +22,7 @@ namespace
     }
 }
 
-void KeyboardControlController::setControlMapProvider(std::function<const ControlMap*()> provider)
+void KeyboardControlController::setControlMapProvider(std::function<ControlMap()> provider)
 {
     controlMapProvider = std::move(provider);
 }
@@ -60,13 +60,23 @@ void KeyboardControlController::setStatusCallback(std::function<void(bool, int)>
 KeyboardControlController::~KeyboardControlController()
 {
     // Destructor releases ownership even if capture was left enabled: closing the
-    // capture-owning instance must restore normal keyboard behavior (US-28).
-    releaseOwnership();
+    // capture-owning instance must restore normal keyboard behavior (US-28). A full
+    // disable also removes the hook, so interception never outlives the controller.
+    // disableCapture() already releases ownership when capture is active; when it is
+    // not, ownership was already released and there is nothing left to do.
+    disableCapture();
+}
+
+bool KeyboardControlController::isCaptureEnabled() const
+{
+    return captureEnabled.load();
 }
 
 bool KeyboardControlController::enableCapture()
 {
-    if (captureEnabled)
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    if (captureEnabled.load())
         return true;   // already owned; no new failure to report
 
     // Exclusive cross-process ownership is checked before entering capture. When
@@ -80,10 +90,20 @@ bool KeyboardControlController::enableCapture()
         return false;
     }
 
-    // Hook installation is owned by the Win32 adapter (later ticket); this foundation
-    // reports success so the visible state can be tested. Hook-install failures surface
-    // through the same status callback once the adapter exists.
-    captureEnabled = true;
+    // Hook installation is owned by the Win32 adapter. A hook that fails to install
+    // must leave capture off (US-27): release the just-acquired ownership and report
+    // the failure through the status callback.
+    if (hookInstallProvider && ! hookInstallProvider())
+    {
+        releaseOwnership();
+
+        if (statusCallback)
+            statusCallback(false, tf::kb::FailReason::hookInstallFailed);
+
+        return false;
+    }
+
+    captureEnabled.store(true);
 
     if (statusCallback)
         statusCallback(true, tf::kb::FailReason::none);
@@ -93,11 +113,19 @@ bool KeyboardControlController::enableCapture()
 
 void KeyboardControlController::disableCapture()
 {
-    if (! captureEnabled)
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    if (! captureEnabled.load())
         return;
 
-    captureEnabled = false;
+    captureEnabled.store(false);
     capturedKeys.clear();
+
+    // Remove the hook before releasing ownership: no capture window where another
+    // instance could take over while our hook is still installed.
+    if (hookUninstallCallback)
+        hookUninstallCallback();
+
     releaseOwnership();
 
     if (statusCallback)
@@ -106,6 +134,8 @@ void KeyboardControlController::disableCapture()
 
 bool KeyboardControlController::handleKeyEvent(const tf::kb::KeyEvent& event)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
     if (event.injected)
         return false;   // software-generated input is ignored, never consumed
 
@@ -119,11 +149,15 @@ bool KeyboardControlController::handleDown(const tf::kb::KeyEvent& event)
 {
     // The Capture Escape Shortcut is evaluated before ordinary mapping, and only
     // while capture is active: consume the chord and disable capture. While off it
-    // is not reserved and never maps.
+    // is not reserved and never maps. The chord is never recorded as a captured
+    // mapped press (S-2): drop it defensively before disabling so its key-up/repeat
+    // window is not locally reserved, while suppression of the physical press stays
+    // at the hook (the adapter suppresses the chord's own repeats and key-up).
     if (isCaptureEscape(event.keyCode, event.modifiers))
     {
-        if (captureEnabled)
+        if (captureEnabled.load())
         {
+            capturedKeys.removeFirstMatchingValue(event.keyCode);
             disableCapture();
             return true;   // consumed only while active
         }
@@ -131,12 +165,15 @@ bool KeyboardControlController::handleDown(const tf::kb::KeyEvent& event)
         return false;
     }
 
-    if (! captureEnabled)
+    if (! captureEnabled.load())
         return false;   // Local Keyboard Control: nothing consumed here
 
     // A repeat of an already-captured press stays consumed without another action.
-    if ((event.modifiers & tf::kb::modRepeat) != 0 && capturedKeys.contains(event.keyCode))
-        return true;
+    // A repeat of an uncaptured press (the hook passed its initial key-down through,
+    // e.g. unmapped, learn-disarmed, or a modified chord) must never re-enter learn
+    // or map matching (S-3): pass it through safely instead.
+    if ((event.modifiers & tf::kb::modRepeat) != 0)
+        return capturedKeys.contains(event.keyCode);
 
     // Mapped bare keys pass through while Ctrl/Alt/Shift/Win is held; modifiers are
     // never assignable as standalone controls.
@@ -157,8 +194,8 @@ bool KeyboardControlController::handleDown(const tf::kb::KeyEvent& event)
         return true;
     }
 
-    const ControlMap* map = controlMapProvider ? controlMapProvider() : nullptr;
-    const ControlAction action = map ? map->matchKey(event.keyCode) : ControlAction {};
+    const ControlMap map = controlMapProvider ? controlMapProvider() : ControlMap {};
+    const ControlAction action = map.matchKey(event.keyCode);
 
     if (! action.isValid())
         return false;   // unmapped key passes through
@@ -186,16 +223,28 @@ bool KeyboardControlController::handleUp(const tf::kb::KeyEvent& event)
 
 bool KeyboardControlController::handleLocalKeyPress(const juce::KeyPress& key)
 {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
     // The hook is authoritative while capture is on: it emits the action for the
     // initial key-down and records the press, so a local JUCE delivery of the same
     // mapped key must be consumed rather than executed again. Unmapped keys and keys
     // the hook passed through (e.g. modified chords, per US-4) keep their normal
     // local behavior, and once capture is off nothing is consumed here. Local
     // Keyboard Control semantics are otherwise unchanged.
-    if (! captureEnabled)
+    if (! captureEnabled.load())
         return false;
 
     return capturedKeys.contains(key.getKeyCode());
+}
+
+void KeyboardControlController::setHookInstallProvider(std::function<bool()> provider)
+{
+    hookInstallProvider = std::move(provider);
+}
+
+void KeyboardControlController::setHookUninstallCallback(std::function<void()> callback)
+{
+    hookUninstallCallback = std::move(callback);
 }
 
 void KeyboardControlController::releaseOwnership()

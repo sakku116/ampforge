@@ -175,6 +175,33 @@ target_link_libraries(AmpForgeKeyboardAdapterTranslationTests
         juce::juce_recommended_warning_flags
 )
 
+# ---------------------------------------------------------------------------
+# Deterministic lifecycle tests for template-owned control maps. Covers the
+# startup fallback, empty capture, and stale slot-action cleanup policy.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeTemplateControlMapTests
+    PRODUCT_NAME "AmpForgeTemplateControlMapTests"
+)
+
+juce_generate_juce_header(AmpForgeTemplateControlMapTests)
+
+target_sources(AmpForgeTemplateControlMapTests
+    PRIVATE
+        tests/TemplateControlMapTests.cpp
+        src/ControlMap.cpp
+        src/TemplateManager.cpp
+        src/Preset.cpp
+)
+
+target_link_libraries(AmpForgeTemplateControlMapTests
+    PRIVATE
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
 if(MSVC)
     target_compile_options(AmpForge PRIVATE /EHa)
 endif()

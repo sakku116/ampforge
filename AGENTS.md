@@ -52,7 +52,7 @@ Runtime data lives in `%APPDATA%\AmpForge\`: `host.log`, `presets/*.tfpreset`, s
 | Audio | `AudioEngine.*` | `AudioDeviceManager`, real-time I/O, atomic master gain/volume/mute, CPU metrics, MIDI routing |
 | Hosting | `PluginHost.*`, `PluginChain.*` | Formats, instances, editors, chain snapshots, crossfade, sections, bypass, stable slot identity |
 | Scanning | `PluginScanner.*`, `ScanSubprocess.*`, `PluginScanGuard.*` | Plugin discovery, cache, worker subprocess, Windows SEH load guard |
-| Persistence | `Preset.*`, `TemplateManager.*`, `ControlMap.*` | Presets, named chain templates, trigger/action and expression mappings |
+| Persistence | `Preset.*`, `TemplateManager.*`, `ControlMap.*` | Presets, named chain templates, trigger/action and expression mappings; see `docs/control-mapping-lifecycle.md` for map ownership |
 | Keyboard capture | `KeyboardControlController.*`, `KeyboardCaptureAdapter.*` | Session-global keyboard policy, Win32 hook translation, exclusive ownership, and message-thread action delivery |
 | Chain UI | `ChainListBox.*` | Vertical rows and horizontal columns, section/slot interactions, levels, volume controls |
 | Theme and logs | `ToneForgeLookAndFeel.*`, `HostDebug.h` | `tf::colour` stage palette and `[AmpForge]` logger |

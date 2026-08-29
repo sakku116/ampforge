@@ -453,12 +453,19 @@ MainComponent::MainComponent()
 
         // Restore scenes first so we know whether an active scene should own the chain.
         restoreTemplates();
-        restoreControlMap();
 
         const int activeScene = templateManager.getCurrentIndex();
 
         if (juce::isPositiveAndBelow(activeScene, templateManager.getNumScenes()))
         {
+            // A template owns its bindings. Do not replace them with the legacy
+            // standalone map, which may have been saved while another template was active.
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap = templateManager.getScene(activeScene).controlMap;
+            }
+            updateControlLabel();
+
             // Active scene takes priority: load async so the UI stays responsive.
             const auto& scene = templateManager.getScene(activeScene);
             setChainLoading(true, 0, scene.specs.size());
@@ -477,6 +484,8 @@ MainComponent::MainComponent()
         }
         else
         {
+            // Retain mappings created before templates existed.
+            restoreControlMap();
             // No active scene — fall back to last saved preset.
             tryRestoreLastPreset();
         }
@@ -917,15 +926,17 @@ void MainComponent::executeAction(const ControlAction& action)
 void MainComponent::captureTemplate()
 {
     const auto name = "Template " + juce::String(templateManager.getNumScenes() + 1);
-    ControlMap mapCopy;
+    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs());
+    templateManager.setCurrentIndex(idx);
     {
         std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
-        mapCopy = controlMap;
+        controlMap.clear();
     }
-    const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs(), mapCopy);
-    templateManager.setCurrentIndex(idx);
     refreshTemplateSelector();
     saveTemplates();
+    saveControlMap();
+    updateControlLabel();
+    refreshChainList();
     setTemplateDirty(false);
     HostDebug::log("Template captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
 }
@@ -1084,11 +1095,25 @@ void MainComponent::restoreTemplates()
 void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const ControlAction& action)
 {
     // Check for an existing binding on the same trigger and ask before overwriting.
-    for (int b = 0; b < controlMap.getNumBindings(); ++b)
+    for (int b = controlMap.getNumBindings() - 1; b >= 0; --b)
     {
         if (controlMap.getBinding(b).trigger.matches(trigger))
         {
             const auto existing = controlMap.getBinding(b).action;
+
+            const bool targetsRemovedSlot =
+                (existing.type == ControlAction::Type::toggleBypass
+                 || existing.type == ControlAction::Type::activatePresetSlot)
+                && findSlotIndexById(existing.index) < 0;
+
+            if (targetsRemovedSlot)
+            {
+                std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                controlMap.removeBinding(b);
+                HostDebug::log("Learn: removed stale " + trigger.toString());
+                continue;
+            }
+
             auto* dlg = new juce::AlertWindow("Duplicate Binding",
                 trigger.toString() + " is already mapped to:\n[" + existing.toString()
                 + "]\n\nOverwrite with [" + action.toString() + "]?",

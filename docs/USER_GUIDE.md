@@ -162,7 +162,7 @@ A template is a named snapshot of the signal chain stored inside the app — no 
 |---------|----------|
 | Dropdown | Select the active template |
 | `◀` / `▶` | Step to the previous / next template |
-| `⊕` | Save the current chain as a new template |
+| `⊕` | Save the current chain as a new template with an empty control map |
 | `↑` | Update the active template with the current chain |
 | `✎` | Rename the active template |
 | `✕` | Delete the active template |

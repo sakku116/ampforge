@@ -54,8 +54,6 @@ target_sources(AmpForge
         src/ChainListBox.cpp
         src/MainComponent.h
         src/MainComponent.cpp
-        src/SerialMidi.h
-        src/SerialMidi.cpp
         src/HostDebug.h
         src/PluginScanGuard.h
         src/PluginScanGuard.cpp

@@ -40,6 +40,8 @@ target_sources(AmpForge
         src/Preset.cpp
         src/ControlMap.h
         src/ControlMap.cpp
+        src/KeyboardControlController.h
+        src/KeyboardControlController.cpp
         src/ControllerBridge.h
         src/ControllerBridge.cpp
         src/TemplateManager.h
@@ -52,6 +54,8 @@ target_sources(AmpForge
         src/ChainListBox.cpp
         src/MainComponent.h
         src/MainComponent.cpp
+        src/SerialMidi.h
+        src/SerialMidi.cpp
         src/HostDebug.h
         src/PluginScanGuard.h
         src/PluginScanGuard.cpp
@@ -116,6 +120,33 @@ add_custom_command(TARGET AmpForgeScanWorker POST_BUILD
         "$<TARGET_FILE:AmpForgeScanWorker>"
         "$<TARGET_FILE_DIR:AmpForge>/AmpForgeScanWorker.exe"
     COMMENT "Copy scan worker next to host executable"
+)
+
+# ---------------------------------------------------------------------------
+# Deterministic host-side tests for the Keyboard Control event boundary (#17,
+# Ticket 17.1). Console app; exercises the controller/state-machine with
+# normalized key events and fake action/learn/status boundaries.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeKeyboardControlTests
+    PRODUCT_NAME "AmpForgeKeyboardControlTests"
+)
+
+juce_generate_juce_header(AmpForgeKeyboardControlTests)
+
+target_sources(AmpForgeKeyboardControlTests
+    PRIVATE
+        tests/KeyboardControlTests.cpp
+        src/KeyboardControlController.cpp
+        src/ControlMap.cpp
+)
+
+target_link_libraries(AmpForgeKeyboardControlTests
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
 )
 
 if(MSVC)

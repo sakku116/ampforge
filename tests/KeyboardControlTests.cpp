@@ -1,0 +1,451 @@
+// Deterministic host-side tests for the public Keyboard Control event boundary (#17,
+// Ticket 17.1). Exercises KeyboardControlController's normalized key-down/repeat/up
+// input plus fake action, learn, ownership, and status callbacks — no Win32 hook, no
+// device, no timing dependency, no audio thread. Tiny harness (no framework):
+// CHECK macros, exit code 0 = pass. Mirrors tests/ControllerBridgeTests.cpp.
+
+#include <cstdio>
+#include <memory>
+
+#include <JuceHeader.h>
+
+#include "../src/KeyboardControlController.h"
+#include "../src/ControlMap.h"
+
+namespace
+{
+    int checks = 0;
+    int failures = 0;
+
+    #define CHECK(cond)                                                        \
+        do {                                                                   \
+            ++checks;                                                          \
+            if (! (cond)) {                                                    \
+                ++failures;                                                    \
+                std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
+            }                                                                  \
+        } while (false)
+
+    // ── normalized key event helpers ─────────────────────────────────────────
+    using namespace tf::kb;
+
+    KeyEvent down(int keyCode)          { return { EventType::keyDown,  keyCode, false, {} }; }
+    KeyEvent repeatDown(int keyCode)    { return { EventType::keyDown,  keyCode, false, { Modifier::modRepeat } }; }
+    KeyEvent up(int keyCode)            { return { EventType::keyUp,    keyCode, false, {} }; }
+    KeyEvent injectedDown(int keyCode)  { return { EventType::keyDown,  keyCode, true,  {} }; }
+    KeyEvent modDown(int keyCode, int modifiers)
+    {
+        return { EventType::keyDown, keyCode, false, modifiers };
+    }
+
+    // ── fake boundaries ──────────────────────────────────────────────────────
+    struct FakeActions
+    {
+        int count = 0;
+        juce::Array<ControlAction> actions;
+        juce::Array<int> keyCodes;
+
+        void clear() { count = 0; actions.clear(); keyCodes.clear(); }
+    };
+
+    struct FakeLearn
+    {
+        int count = 0;
+        juce::Array<ControlTrigger> triggers;
+
+        void clear() { count = 0; triggers.clear(); }
+    };
+
+    struct FakeStatus
+    {
+        int modeChanges = 0;
+        int lastFailedReason = -1;
+
+        void clear() { modeChanges = 0; lastFailedReason = -1; }
+    };
+
+    juce::KeyPress keyPressFor(int keyCode)
+    {
+        return { keyCode, juce::ModifierKeys::noModifiers, 0 };
+    }
+}
+
+int main()
+{
+    // The thread that first creates the MessageManager becomes the message thread.
+    juce::MessageManager::getInstance();
+
+    // ── Slice 1: session state; enable/disable; local pass-through; no restore ──
+    {
+        FakeActions actions;
+        FakeStatus status;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool enabled, int reason)
+        {
+            ++status.modeChanges;
+            if (! enabled && reason != 0)
+                status.lastFailedReason = reason;
+        });
+
+        // starts off; local (focused) delivery passes through with no action
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.isEmpty());
+
+        // enable -> visible state on
+        CHECK(controller.enableCapture());
+        CHECK(controller.isCaptureEnabled());
+
+        // disable -> visible state off, pass-through restored
+        controller.disableCapture();
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.isEmpty());
+        CHECK(status.modeChanges >= 2);
+    }
+
+    // ── Slice 2: mapped key fires once per physical press; repeat/up consumed ──
+    {
+        FakeActions actions;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        CHECK(controller.enableCapture());
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(actions.actions.getFirst().type == ControlAction::Type::toggleBypass);
+
+        // auto-repeat key-down and matching key-up: consumed, no extra action
+        CHECK(controller.handleKeyEvent(repeatDown(juce::KeyPress::F5Key)));
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+    }
+
+    // ── Slice 3: unmapped keys, modifiers, capture escape, injected events ────
+    {
+        FakeActions actions;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        CHECK(controller.enableCapture());
+
+        // unmapped key passes through without an action
+        CHECK(! controller.handleKeyEvent(down(juce::KeyPress::F6Key)));
+        CHECK(actions.actions.isEmpty());
+
+        // mapped key with Ctrl/Alt/Shift/Win held passes through without an action
+        CHECK(! controller.handleKeyEvent(modDown(juce::KeyPress::F5Key, tf::kb::modCtrl)));
+        CHECK(! controller.handleKeyEvent(modDown(juce::KeyPress::F5Key, tf::kb::modAlt)));
+        CHECK(! controller.handleKeyEvent(modDown(juce::KeyPress::F5Key, tf::kb::modShift)));
+        CHECK(! controller.handleKeyEvent(modDown(juce::KeyPress::F5Key, tf::kb::modWin)));
+        CHECK(actions.actions.isEmpty());
+
+        // injected events are ignored: never consumed, no action
+        CHECK(! controller.handleKeyEvent(injectedDown(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.isEmpty());
+
+        // Ctrl+Shift+F11 disables active capture, is consumed while active, never maps
+        CHECK(controller.isCaptureEnabled());
+        CHECK(controller.handleKeyEvent(modDown(juce::KeyPress::F11Key, tf::kb::modCtrl | tf::kb::modShift)));
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(actions.actions.isEmpty());
+
+        // while off the escape chord passes through and stays unassigned
+        CHECK(! controller.handleKeyEvent(modDown(juce::KeyPress::F11Key, tf::kb::modCtrl | tf::kb::modShift)));
+        CHECK(! controller.isCaptureEnabled());
+    }
+
+    // ── Slice 4: live Control Map changes take effect for the next press ─────
+    {
+        FakeActions actions;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::nextTemplate, 0 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        CHECK(controller.enableCapture());
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(actions.actions.getFirst().type == ControlAction::Type::nextTemplate);
+
+        // a release belonging to the captured press stays consumed even after the
+        // mapping changed
+        map.clear();
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F6Key },
+                         { ControlAction::Type::prevTemplate, 0 } });
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+
+        // the next press uses the current Control Map
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F6Key)));
+        CHECK(actions.actions.size() == 2);
+        CHECK(actions.actions.getLast().type == ControlAction::Type::prevTemplate);
+    }
+
+    // ── Slice 5: Learn Control precedence + focused-window single action ────
+    {
+        FakeActions actions;
+        FakeLearn learn;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger& t) { learn.triggers.add(t); });
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        CHECK(controller.enableCapture());
+
+        // learn armed: the key already has an action; learning emits the trigger and
+        // consumes the press without executing the old action
+        bool learnArmed = true;
+        controller.setLearnArmedProvider([&] { return learnArmed; });
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(learn.triggers.size() == 1);
+        CHECK(learn.triggers.getFirst().type == ControlTrigger::Type::key);
+        CHECK(learn.triggers.getFirst().number == juce::KeyPress::F5Key);
+        CHECK(actions.actions.isEmpty());   // old action NOT executed
+
+        // repeats and the key-up of the learned press stay consumed
+        CHECK(controller.handleKeyEvent(repeatDown(juce::KeyPress::F5Key)));
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(learn.triggers.size() == 1);
+        CHECK(actions.actions.isEmpty());
+
+        // learn disarmed: the same key now executes its action normally
+        learnArmed = false;
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(learn.triggers.size() == 1);
+        controller.handleKeyEvent(up(juce::KeyPress::F5Key));
+
+        // focused-window delivery: the hook is authoritative while capture is on.
+        // A bare mapped press the hook captured is consumed locally so it cannot
+        // execute a second action; unmapped keys and passed-through keys keep
+        // their normal local behavior (typing, dialog use).
+        actions.clear();
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);   // no duplicate action
+
+        // unmapped local key passes through while capture is on
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F6Key)));
+        CHECK(actions.actions.size() == 1);
+
+        // release: the captured key-up is consumed and the key stops being tracked,
+        // so a later key the hook passed through is not consumed locally
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F5Key)));
+
+        // after disable, local delivery passes through to existing JUCE behavior
+        controller.disableCapture();
+        CHECK(! controller.handleLocalKeyPress(keyPressFor(juce::KeyPress::F5Key)));
+    }
+
+    // ── Slice 6: activation failure, ownership contention, teardown ──────────
+    {
+        FakeActions actions;
+        FakeLearn learn;
+        FakeStatus status;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool enabled, int reason)
+        {
+            ++status.modeChanges;
+            if (! enabled && reason != 0)
+                status.lastFailedReason = reason;
+        });
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        // activation failure: request is refused, state stays off, reason reported,
+        // no actions emitted
+        bool ownershipAvailable = false;
+        controller.setOwnershipProvider([&] { return ownershipAvailable; });
+        CHECK(! controller.enableCapture());
+        CHECK(! controller.isCaptureEnabled());
+        CHECK(status.lastFailedReason == tf::kb::FailReason::ownershipConflict);
+        CHECK(actions.actions.isEmpty());
+
+        // ownership released: a later activation succeeds
+        ownershipAvailable = true;
+        CHECK(controller.enableCapture());
+        CHECK(controller.isCaptureEnabled());
+        status.clear();
+
+        // a competing enable while already owned stays on (no new failure)
+        CHECK(controller.enableCapture());
+        CHECK(controller.isCaptureEnabled());
+        CHECK(status.modeChanges == 0);
+
+        controller.disableCapture();
+
+        // teardown: destruction releases ownership and leaves no active callback
+        // target. The stateful fake ownership records every release, so we can
+        // observe the release itself (not just trust the comment).
+        int owned = 0;
+        int released = 0;
+        {
+            KeyboardControlController transient;
+            transient.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+            transient.setLearnCallback([&](const ControlTrigger&) {});
+            transient.setStatusCallback([&](bool, int) {});
+            transient.setControlMapProvider([&] { return &map; });
+            transient.setOwnershipProvider([&]
+            {
+                if (owned > released)   // ownership held until released
+                    return false;
+                ++owned;
+                return true;
+            });
+            transient.setOwnershipReleaseCallback([&] { ++released; });
+
+            CHECK(transient.enableCapture());
+            CHECK(transient.isCaptureEnabled());
+            CHECK(owned == 1 && released == 0);   // held
+
+            // explicit disable releases ownership synchronously
+            transient.disableCapture();
+            CHECK(released == 1);
+            CHECK(! transient.isCaptureEnabled());
+
+            // re-enable acquires again; the release callback stays wired to the
+            // controller's lifetime
+            CHECK(transient.enableCapture());
+            CHECK(owned == 2 && released == 1);
+            CHECK(transient.isCaptureEnabled());
+            // destroyed here: destructor must release ownership and drop the
+            // callback target so no dangling release/action can fire later
+        }
+
+        // observable post-destruction: ownership was released by the destructor, the
+        // stateful fake can re-acquire, and no action was emitted after teardown
+        CHECK(released == 2);   // set above via the lambda captured by reference
+        CHECK(actions.actions.isEmpty());   // teardown emitted nothing
+
+        // the original controller can re-acquire ownership after teardown and works
+        ownershipAvailable = true;
+        CHECK(controller.enableCapture());
+        CHECK(controller.isCaptureEnabled());
+        CHECK(! controller.handleKeyEvent(down(juce::KeyPress::F6Key)));   // unmapped: pass
+        controller.handleKeyEvent(up(juce::KeyPress::F6Key));
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);   // mapped press works after teardown
+        controller.handleKeyEvent(up(juce::KeyPress::F5Key));
+        controller.disableCapture();
+    }
+
+    // ── Slice 7: Control Map key matching + serialization round-trip ────────
+    {
+        // existing key trigger numbers round-trip unchanged and remain usable
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::numberPad0 },
+                         { ControlAction::Type::activatePresetSlot, 2 } });
+
+        const auto tree = map.toValueTree();
+        ControlMap restored;
+        restored.fromValueTree(tree);
+
+        CHECK(restored.getNumBindings() == 2);
+        CHECK(restored.getBinding(0).trigger.type == ControlTrigger::Type::key);
+        CHECK(restored.getBinding(0).trigger.number == juce::KeyPress::F5Key);
+        CHECK(restored.getBinding(0).action.type == ControlAction::Type::toggleBypass);
+        CHECK(restored.getBinding(1).trigger.number == juce::KeyPress::numberPad0);
+        CHECK(restored.getBinding(1).action.type == ControlAction::Type::activatePresetSlot);
+        CHECK(restored.getBinding(1).action.index == 2);
+
+        // the restored map matches through the public boundary
+        FakeActions actions;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool, int) {});
+        controller.setControlMapProvider([&] { return &restored; });
+
+        CHECK(controller.enableCapture());
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 1);
+        CHECK(actions.actions.getFirst().type == ControlAction::Type::toggleBypass);
+        controller.handleKeyEvent(up(juce::KeyPress::F5Key));
+
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::numberPad0)));
+        CHECK(actions.actions.size() == 2);
+        CHECK(actions.actions.getLast().type == ControlAction::Type::activatePresetSlot);
+        CHECK(actions.actions.getLast().index == 2);
+        controller.handleKeyEvent(up(juce::KeyPress::numberPad0));
+        controller.disableCapture();
+    }
+
+    // ── Slice 8: edge cases ──────────────────────────────────────────────────
+    {
+        FakeActions actions;
+        KeyboardControlController controller;
+        controller.setActionCallback([&](const ControlAction& a) { actions.actions.add(a); });
+        controller.setLearnCallback([&](const ControlTrigger&) {});
+        controller.setStatusCallback([&](bool, int) {});
+
+        ControlMap map;
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F5Key },
+                         { ControlAction::Type::toggleBypass, 0 } });
+        map.addBinding({ { ControlTrigger::Type::key, 0, juce::KeyPress::F6Key },
+                         { ControlAction::Type::toggleBypass, 1 } });
+        controller.setControlMapProvider([&] { return &map; });
+
+        CHECK(controller.enableCapture());
+
+        // a key-up with no captured press passes through
+        CHECK(! controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+
+        // a second mapped key pressed while the first is held: emits once, both
+        // releases stay consumed
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(controller.handleKeyEvent(down(juce::KeyPress::F6Key)));
+        CHECK(actions.actions.size() == 2);
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(controller.handleKeyEvent(up(juce::KeyPress::F6Key)));
+        CHECK(actions.actions.size() == 2);
+
+        // injected key-up is ignored
+        CHECK(! controller.handleKeyEvent({ EventType::keyUp, juce::KeyPress::F5Key, true, {} }));
+
+        controller.disableCapture();
+
+        // disabled: no consumption, no actions, key-up passes through
+        CHECK(! controller.handleKeyEvent(down(juce::KeyPress::F5Key)));
+        CHECK(! controller.handleKeyEvent(up(juce::KeyPress::F5Key)));
+        CHECK(actions.actions.size() == 2);
+    }
+
+    std::printf("%d checks, %d failure(s)\n", checks, failures);
+    return failures == 0 ? 0 : 1;
+}

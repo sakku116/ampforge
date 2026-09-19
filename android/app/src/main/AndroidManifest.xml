@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Amp Forge Controller — Native Android Controller App (#12).
-     A BLE MIDI peripheral (GATT server): Windows pairs it as a MIDI device, the host
-     sends Controller Snapshot / Feedback SysEx, the app sends notes 60-67 on channel 16. -->
+     A classic Bluetooth SPP (RFCOMM) server: Windows pairs it and exposes the service
+     as a COM port; the host sends Controller Snapshot / Feedback SysEx, the app sends
+     notes 60-67 on channel 16. SPP works on every Windows build (BLE MIDI drivers were
+     removed in Windows 11 24H2+). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Android 9-11: normal Bluetooth permissions. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-    <!-- Android 12+: runtime permissions for the GATT server and BLE advertising. -->
+    <!-- Android 12+: runtime permissions for the SPP server socket and discoverability. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
 
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
 
     <application
         android:label="Amp Forge Controller"

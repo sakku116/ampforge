@@ -431,12 +431,30 @@ MainComponent::MainComponent()
     });
 
     // Controller Bridge (#11): the host-side seam that mirrors learned Stomp/Preset
-    // assignments to a paired Bluetooth MIDI controller and feeds it snapshots/updates.
+    // assignments to a paired Bluetooth controller and feeds it snapshots/updates.
     controllerBridge.setSendCallback([this](const juce::MidiMessage& message)
     {
         audioEngine.sendMidiMessage(message);
+        serialMidi.writeToAll(message);   // classic SPP transport (#13)
     });
     controllerBridge.setHostStateProvider([this] { return buildControllerState(); });
+
+    // Classic Bluetooth SPP controller (#13): the phone's SPP service is exposed by
+    // Windows as a COM port; raw MIDI bytes flow over it in both directions.
+    serialMidi.start(
+        [this](const juce::MidiMessage& message, const juce::String& portName)
+        {
+            onSerialMidi(message, portName);
+        },
+        [this](const juce::String& portName, bool connected)
+        {
+            // The reader thread must not touch the UI; updateControllerStatus runs on
+            // the message thread.
+            juce::MessageManager::callAsync([this, portName, connected]
+            {
+                onSerialPortState(portName, connected);
+            });
+        });
 
     startTimerHz(10);   // performance metrics refresh
 
@@ -491,6 +509,7 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    serialMidi.stop();
 
     // Global Keyboard Capture teardown: the controller releases ownership and the
     // adapter removes the hook, so normal keyboard behavior is restored even if
@@ -1247,11 +1266,31 @@ ControllerBridge::HostState MainComponent::buildControllerState() const
     return state;
 }
 
+void MainComponent::onSerialMidi(const juce::MidiMessage& message, const juce::String& portName)
+{
+    // A serial-sourced message means the controller rides the classic SPP transport;
+    // route it through the same pipeline as MIDI-device input.
+    controllerIsSerial = true;
+    handleControlMidi(message, "BT Serial (" + portName + ")");
+}
+
+void MainComponent::onSerialPortState(const juce::String&, bool connected)
+{
+    // A Bluetooth COM port dropped (phone backgrounded/locked/off). Treat a serial
+    // controller as disconnected until its next ready request; the SerialMidi reader
+    // reconnects and the phone re-sends READY automatically.
+    if (! connected && controllerIsSerial && controllerBridge.isConnected())
+        controllerBridge.notifyDisconnected();
+    updateControllerStatus();
+}
+
 void MainComponent::updateControllerStatus()
 {
     // Device-gone detection: a connected controller whose MIDI input device has
-    // vanished is treated as disconnected until its next ready request.
-    if (controllerBridge.isConnected() && controllerBridge.getControllerDeviceName().isNotEmpty())
+    // vanished is treated as disconnected until its next ready request. Serial
+    // (SPP) controllers are tracked by the COM port lifecycle instead.
+    if (controllerBridge.isConnected() && ! controllerIsSerial
+        && controllerBridge.getControllerDeviceName().isNotEmpty())
     {
         bool found = false;
         for (const auto& device : juce::MidiInput::getAvailableDevices())

@@ -7,6 +7,7 @@
 #include "PluginScanner.h"
 #include "ControlMap.h"
 #include "ControllerBridge.h"
+#include "SerialMidi.h"
 #include "KeyboardControlController.h"
 #include "KeyboardCaptureAdapter.h"
 #include "TemplateManager.h"
@@ -319,6 +320,8 @@ private:
     // Android Controller Bridge (Phase 4.8)
     void updateControllerStatus();
     ControllerBridge::HostState buildControllerState() const;
+    void onSerialMidi(const juce::MidiMessage& message, const juce::String& portName);
+    void onSerialPortState(const juce::String& portName, bool connected);
 
     // ── Theme (declared first so it outlives every child component) ────────────
     ToneForgeLookAndFeel lookAndFeel;
@@ -328,6 +331,8 @@ private:
     AudioEngine audioEngine;
     PluginScanner pluginScanner;
     ControllerBridge controllerBridge;
+    SerialMidi serialMidi;
+    bool controllerIsSerial = false;   // controller connected via a Bluetooth COM port
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;

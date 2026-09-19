@@ -6,14 +6,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/sakku116/ampforge/releases/tag/v0.3.0"><img src="https://img.shields.io/github/v/release/sakku116/ampforge?label=latest&color=0d9488" alt="Latest Release"/></a>
+  <a href="https://github.com/sakku116/ampforge/releases/tag/v0.4.0"><img src="https://img.shields.io/github/v/release/sakku116/ampforge?label=latest&color=0d9488" alt="Latest Release"/></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-blue" alt="Platform"/>
   <img src="https://img.shields.io/badge/built%20with-JUCE%208%20%2B%20C%2B%2B20-lightgrey" alt="JUCE + C++20"/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPLv3-green" alt="License AGPLv3"/></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/sakku116/ampforge/releases/tag/v0.3.0"><strong>⬇ Download v0.3.0 (Windows, portable ZIP)</strong></a>
+  <a href="https://github.com/sakku116/ampforge/releases/tag/v0.4.0"><strong>⬇ Download v0.4.0 (Windows, portable ZIP)</strong></a>
 </p>
 
 ---
@@ -60,7 +60,7 @@ The main things that made it worth building:
 
 ## Getting started
 
-1. **[Download the latest release](https://github.com/sakku116/ampforge/releases/tag/v0.3.0)** and extract the ZIP anywhere
+1. **[Download the latest release](https://github.com/sakku116/ampforge/releases/tag/v0.4.0)** and extract the ZIP anywhere
 2. Run `Amp Forge.exe`
 3. Open **Audio Settings** and pick your interface (ASIO strongly recommended)
 4. VST3 plugins in standard locations show up automatically in the Library — for other folders, use **Scan Paths...**

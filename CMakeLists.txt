@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(AmpForge VERSION 0.3.0 LANGUAGES CXX)
+project(AmpForge VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,6 +40,12 @@ target_sources(AmpForge
         src/Preset.cpp
         src/ControlMap.h
         src/ControlMap.cpp
+        src/KeyboardControlController.h
+        src/KeyboardControlController.cpp
+        src/KeyboardCaptureAdapter.h
+        src/KeyboardCaptureAdapter.cpp
+        src/ControllerBridge.h
+        src/ControllerBridge.cpp
         src/TemplateManager.h
         src/TemplateManager.cpp
         src/PluginHost.h
@@ -83,11 +89,117 @@ target_link_libraries(AmpForgeScanWorker
 
 add_dependencies(AmpForge AmpForgeScanWorker)
 
+# ---------------------------------------------------------------------------
+# Deterministic host-side tests for the Controller Bridge (#11). Console app;
+# exercises the bridge's public MIDI boundary with a fake outgoing endpoint.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeControllerBridgeTests
+    PRODUCT_NAME "AmpForgeControllerBridgeTests"
+)
+
+juce_generate_juce_header(AmpForgeControllerBridgeTests)
+
+target_sources(AmpForgeControllerBridgeTests
+    PRIVATE
+        tests/ControllerBridgeTests.cpp
+        src/ControllerBridge.cpp
+        src/ControllerProtocol.h
+)
+
+target_link_libraries(AmpForgeControllerBridgeTests
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_events
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
 add_custom_command(TARGET AmpForgeScanWorker POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:AmpForgeScanWorker>"
         "$<TARGET_FILE_DIR:AmpForge>/AmpForgeScanWorker.exe"
     COMMENT "Copy scan worker next to host executable"
+)
+
+# ---------------------------------------------------------------------------
+# Deterministic host-side tests for the Keyboard Control event boundary (#17,
+# Ticket 17.1). Console app; exercises the controller/state-machine with
+# normalized key events and fake action/learn/status boundaries.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeKeyboardControlTests
+    PRODUCT_NAME "AmpForgeKeyboardControlTests"
+)
+
+juce_generate_juce_header(AmpForgeKeyboardControlTests)
+
+target_sources(AmpForgeKeyboardControlTests
+    PRIVATE
+        tests/KeyboardControlTests.cpp
+        src/KeyboardControlController.cpp
+        src/ControlMap.cpp
+)
+
+target_link_libraries(AmpForgeKeyboardControlTests
+    PRIVATE
+        juce::juce_audio_basics
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
+# ---------------------------------------------------------------------------
+# Focused tests for the Win32 key-code translation behind Global Keyboard
+# Capture (Ticket 17.2). Pure translation (no hook, no device): pins native
+# VK_* values to the JUCE key-code space Local Keyboard Control persists.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeKeyboardAdapterTranslationTests
+    PRODUCT_NAME "AmpForgeKeyboardAdapterTranslationTests"
+)
+
+juce_generate_juce_header(AmpForgeKeyboardAdapterTranslationTests)
+
+target_sources(AmpForgeKeyboardAdapterTranslationTests
+    PRIVATE
+        tests/KeyboardAdapterTranslationTests.cpp
+        src/KeyboardCaptureAdapter.cpp
+)
+
+target_link_libraries(AmpForgeKeyboardAdapterTranslationTests
+    PRIVATE
+        juce::juce_gui_basics
+        juce::juce_audio_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+)
+
+# ---------------------------------------------------------------------------
+# Deterministic lifecycle tests for template-owned control maps. Covers the
+# startup fallback, empty capture, and stale slot-action cleanup policy.
+# ---------------------------------------------------------------------------
+juce_add_console_app(AmpForgeTemplateControlMapTests
+    PRODUCT_NAME "AmpForgeTemplateControlMapTests"
+)
+
+juce_generate_juce_header(AmpForgeTemplateControlMapTests)
+
+target_sources(AmpForgeTemplateControlMapTests
+    PRIVATE
+        tests/TemplateControlMapTests.cpp
+        src/ControlMap.cpp
+        src/TemplateManager.cpp
+        src/Preset.cpp
+)
+
+target_link_libraries(AmpForgeTemplateControlMapTests
+    PRIVATE
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
 )
 
 if(MSVC)

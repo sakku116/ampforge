@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.4.0] — 2026-09-19
+
+### Added
+- Optional Global Keyboard Capture lets active-template key mappings control Amp Forge while another application has focus.
+- `Global Keys: OFF/ON` session toggle with amber active state and fixed Ctrl+Shift+F11 escape shortcut.
+- Windows-native exclusive capture ownership, mapped-key suppression, modifier pass-through, and injected-input rejection.
+
+### Fixed
+- Keyboard actions execute only once per physical press while Global Keyboard Capture is active.
+- Template changes and mapping edits immediately update the globally captured controls without restarting capture.
+
+---
+
 ## [0.3.0] — 2026-06-16
 
 ### Added

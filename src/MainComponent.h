@@ -6,6 +6,9 @@
 #include "PluginHost.h"
 #include "PluginScanner.h"
 #include "ControlMap.h"
+#include "ControllerBridge.h"
+#include "KeyboardControlController.h"
+#include "KeyboardCaptureAdapter.h"
 #include "TemplateManager.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
@@ -287,8 +290,11 @@ private:
     void tryRestoreLastPreset();
 
     // Live control (Phase 4)
-    void handleControlMidi(const juce::MidiMessage& message);   // called on the MIDI thread
+    void handleControlMidi(const juce::MidiMessage& message, const juce::String& sourceDeviceName);   // called on the MIDI thread
     void executeAction(const ControlAction& action);           // called on the message thread
+
+    // Global Keyboard Capture (Ticket 17.3): the CONTROL footer toggle entry point.
+    void toggleGlobalKeys();
 
     // Templates (Phase 4.5)
     void captureTemplate();
@@ -310,6 +316,10 @@ private:
     void saveControlMap();
     void restoreControlMap();
 
+    // Android Controller Bridge (Phase 4.8)
+    void updateControllerStatus();
+    ControllerBridge::HostState buildControllerState() const;
+
     // ── Theme (declared first so it outlives every child component) ────────────
     ToneForgeLookAndFeel lookAndFeel;
 
@@ -317,6 +327,7 @@ private:
     PluginHost pluginHost;
     AudioEngine audioEngine;
     PluginScanner pluginScanner;
+    ControllerBridge controllerBridge;
 
     // ── UI ───────────────────────────────────────────────────────────────────
     juce::Label titleLabel;
@@ -367,8 +378,10 @@ private:
     LevelMeterBar    masterOutputMeter;
 
     juce::Label      controlLabel;
+    juce::Label      controllerStatusLabel;   // Android controller connected / mismatch / disconnected
     juce::TextButton learnExprButton         { "Learn Expression" };
     juce::TextButton clearMapsButton         { "Clear Maps" };
+    juce::TextButton globalKeysButton        { "Global Keys: OFF" };
 
     juce::StringArray paletteNames;
     juce::Array<juce::PluginDescription> filteredPlugins;
@@ -406,6 +419,25 @@ private:
     std::atomic<bool> expressionLearnArmed { false };
     int pendingExprSlot = 0;
     int pendingExprParam = 0;
+
+    // ── Global Keyboard Capture (Ticket 17.2) ────────────────────────────────
+    KeyboardControlController keyboardController;
+    KeyboardCaptureAdapter keyboardAdapter;
+
+    // Ticket 17.3: CONTROL-area status label. The toggle button itself lives with the
+    // other footer buttons below; this label shows the short reason when activation
+    // fails (another instance owns capture / Windows refused the hook) and clears once
+    // the failure is visible. Both are updated from the controller's status callback
+    // (the existing status mirror) — capture state is never persisted.
+    juce::Label globalKeysStatusLabel;
+    void setGlobalKeysUi(bool enabled);   // text + amber emphasis (message thread)
+
+    // Serializes the Control Map against the hook thread: the adapter's event sink
+    // runs on the hook thread and copies the map via the provider, so the copy must
+    // not race message-thread mutations (binding add/remove/clear, template recall).
+    std::recursive_mutex controlMapMutex;
+
+    void waitForKeyboardHookExit();   // message-thread teardown: join the hook thread
 
     // ── Persistence ──────────────────────────────────────────────────────────
     juce::ApplicationProperties appProperties;

@@ -26,7 +26,7 @@ Amp Forge is a real-time desktop VST3/VST2 plugin host for guitar processing. Wi
 │  TEMPLATES: [Dropdown ▼] [◀] [▶] [⊕] [↑] [✎] [✕]  ●        │
 │  MASTER:  In Gain [━━━━━━] Out Vol [━━━━━━] [MUTE] [In Ch ▼]│
 │           [▬▬▬▬▬▬▬▬▬▬] [▬▬▬▬▬▬▬▬▬▬]  ← peak meters         │
-│  CONTROL: [status]  [Learn Expression]  [Clear Maps]         │
+│  CONTROL: [status]  [Learn Expression]  [Clear Maps]  [Global Keys: OFF] │
 └──────────────────────────────────────────────────────────────┘
 ```
 *`[■]` = active badge (blue for stomp, teal for active preset)*  
@@ -162,7 +162,7 @@ A template is a named snapshot of the signal chain stored inside the app — no 
 |---------|----------|
 | Dropdown | Select the active template |
 | `◀` / `▶` | Step to the previous / next template |
-| `⊕` | Save the current chain as a new template |
+| `⊕` | Save the current chain as a new template with an empty control map |
 | `↑` | Update the active template with the current chain |
 | `✎` | Rename the active template |
 | `✕` | Delete the active template |
@@ -197,6 +197,38 @@ Click **Learn Expression** → select a slot and a parameter in the plugin edito
 ### Clearing All Bindings
 
 Click **Clear Maps** to delete every binding at once. All badge labels disappear immediately.
+
+### Global Keys: OFF/ON (Global Keyboard Capture)
+
+By default Amp Forge controls its keyboard mappings **only while its window has focus** (Local Keyboard Control). The **Global Keys** toggle in the CONTROL footer switches to **Global Keyboard Capture**: the active template's keyboard mappings keep working even when Amp Forge is minimized or another application is in the foreground, and a mapped key is **suppressed** — it never reaches the other application.
+
+| State | Meaning |
+|-------|---------|
+| `Global Keys: OFF` | Local Keyboard Control — mapped keys work only while Amp Forge is focused |
+| `Global Keys: ON` | Global Keyboard Capture — mapped keys work app-wide and are unavailable to other apps (amber button) |
+
+Behavior while ON:
+
+- **Mapped keys are suppressed.** Pressing a mapped bare key fires its Amp Forge action once and the key is not delivered to the foreground application (including its auto-repeat and release events).
+- **Unmapped keys pass through unchanged.** Global Keyboard Capture never locks your keyboard — typing in other apps keeps working.
+- **Modified shortcuts keep their normal behavior.** A mapped key does not trigger while Ctrl, Alt, Shift, or Win is held; those chords (e.g. Ctrl+C, Alt+Tab) go to the foreground application as usual.
+- **Session-only.** Global Keys always starts OFF at launch, is never saved in settings, templates, or presets, and stays enabled while you change templates. Closing or crashing Amp Forge restores normal keyboard behavior everywhere.
+- **Ctrl+Shift+F11 is the Capture Escape Shortcut.** It disables Global Keyboard Capture from anywhere, even while another app has focus. It passes through normally while capture is already OFF and can never be assigned as a mapping.
+- **One action per press.** A mapped key executes exactly once per physical press, including while Amp Forge itself is focused (the global hook is authoritative). Learn Control still takes priority while capture is ON.
+- **One instance owns capture.** Only one running Amp Forge instance can enable Global Keys. If another instance already owns capture, the toggle stays OFF and shows a short reason next to it: *"Another instance owns capture"*. If Windows refuses to install the capture hook, the toggle stays OFF with *"Hook install failed"*.
+- **Excluded input.** Software-generated (injected) keyboard input is ignored. Secure Windows sequences such as Ctrl+Alt+Delete and the lock screen are never intercepted.
+
+### Manual Windows Acceptance (Notepad)
+
+1. Learn a key (e.g. `Q`) to a Stomp slot via **Learn Control**, then click **Global Keys** so it reads `Global Keys: ON` (amber).
+2. Open Notepad and press `Q` while Notepad has focus: the slot toggles and **no `q` is typed** (suppression).
+3. Type other letters and use Ctrl+C / Ctrl+V / Alt+Tab in Notepad: they work normally (unmapped and modified-key pass-through).
+4. Click back into Amp Forge and press `Q`: exactly **one** toggle happens (no duplicate action while focused).
+5. Hold `Q`: the slot toggles once and no `qqq…` is typed (repeats suppressed).
+6. Recall another template whose map has different keys; the new mappings take effect immediately.
+7. Press **Ctrl+Shift+F11** from anywhere: capture stops (`Global Keys: OFF`), and `Q` types normally in Notepad again.
+8. Launch a second Amp Forge instance and click its **Global Keys**: it stays OFF and shows *"Another instance owns capture"*. Close the first instance, then enable Global Keys in the second — it works.
+9. Close the capture-owning instance entirely: Notepad typing is fully normal.
 
 ---
 

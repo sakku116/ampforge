@@ -23,7 +23,7 @@ struct ControlAction
     enum class Type { none, nextTemplate, prevTemplate, loadTemplate, toggleBypass, activatePresetSlot };
 
     Type type = Type::none;
-    int index = 0;   // scene index (loadScene) or slot index (toggleBypass)
+    int index = 0;   // scene index (loadTemplate) or stable slot ID (slot actions)
 
     bool isValid() const { return type != Type::none; }
     juce::String toString() const;
@@ -61,6 +61,8 @@ public:
     void addBinding(ControlBinding binding);
     void removeBinding(int index);
     void clear();
+    /** Removes slot actions whose stable slot IDs are absent from the active chain. */
+    int removeInvalidSlotBindings(const juce::Array<int>& validSlotIds);
 
     int getNumBindings() const { return (int) bindings.size(); }
     const ControlBinding& getBinding(int index) const { return bindings[(size_t) index]; }

@@ -37,6 +37,8 @@ public:
 
     int  getCurrentIndex() const { return currentIndex; }
     void setCurrentIndex(int index) { currentIndex = index; }
+    /** Returns the active template's map, or the legacy map when no template is active. */
+    ControlMap getCurrentControlMapOr(const ControlMap& legacyMap) const;
 
     juce::ValueTree toValueTree() const;
     void fromValueTree(const juce::ValueTree& tree);

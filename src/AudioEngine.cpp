@@ -34,6 +34,7 @@ void AudioEngine::start()
         HostDebug::log("Audio callback not registered — no output device");
 
     enableAllMidiInputs();
+    openMidiOutputs();
 }
 
 void AudioEngine::enableAllMidiInputs()
@@ -52,9 +53,39 @@ void AudioEngine::enableAllMidiInputs()
     }
 }
 
+void AudioEngine::openMidiOutputs()
+{
+    midiOutputs.clear();
+
+    const auto devices = juce::MidiOutput::getAvailableDevices();
+    HostDebug::log("MIDI outputs available: " + juce::String(devices.size()));
+
+    for (const auto& device : devices)
+    {
+        if (auto output = juce::MidiOutput::openDevice(device.identifier))
+        {
+            output->startBackgroundThread();
+            midiOutputs.push_back(std::move(output));
+            HostDebug::log("  MIDI out opened: " + device.name);
+        }
+        else
+        {
+            HostDebug::log("  MIDI out failed to open: " + device.name);
+        }
+    }
+}
+
+void AudioEngine::sendMidiMessage(const juce::MidiMessage& message)
+{
+    for (auto& output : midiOutputs)
+        output->sendMessageNow(message);
+}
+
 void AudioEngine::stop()
 {
     HostDebug::log("AudioEngine::stop");
+
+    midiOutputs.clear();
 
     for (const auto& device : juce::MidiInput::getAvailableDevices())
         deviceManager.removeMidiInputDeviceCallback(device.identifier, this);
@@ -194,12 +225,12 @@ void AudioEngine::audioDeviceStopped()
         onDeviceChanged();
 }
 
-void AudioEngine::handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage& message)
+void AudioEngine::handleIncomingMidiMessage(juce::MidiInput* source, const juce::MidiMessage& message)
 {
     midiCollector.addMessageToQueue(message);   // forwarded to the plugin chain on the audio thread
 
     if (onMidiForControl)
-        onMidiForControl(message);              // tapped for control mapping (Phase 4.2)
+        onMidiForControl(message, source != nullptr ? source->getName() : juce::String());
 }
 
 double AudioEngine::getInputLatencyMs() const

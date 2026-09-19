@@ -56,6 +56,14 @@ void TemplateManager::clear()
     currentIndex = -1;
 }
 
+ControlMap TemplateManager::getCurrentControlMapOr(const ControlMap& legacyMap) const
+{
+    if (juce::isPositiveAndBelow(currentIndex, (int) scenes.size()))
+        return scenes[(size_t) currentIndex].controlMap;
+
+    return legacyMap;
+}
+
 juce::ValueTree TemplateManager::toValueTree() const
 {
     juce::ValueTree root("SCENES");

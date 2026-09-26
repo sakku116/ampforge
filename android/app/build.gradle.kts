@@ -9,8 +9,8 @@ android {
 
     defaultConfig {
         applicationId = "com.ampforge.controller"
-        // BLE GATT server + advertising work on older versions too, but the public
-        // Bluetooth MIDI stack and the Android 12+ permission model are clearest from 9.
+        // Classic Bluetooth SPP works on every Android version; the Android 12+
+        // permission model is clearest from 9.
         minSdk = 28
         targetSdk = 34
         versionCode = 1

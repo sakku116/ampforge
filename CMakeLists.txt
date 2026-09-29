@@ -48,6 +48,7 @@ target_sources(AmpForge
         src/ControllerBridge.cpp
         src/TemplateManager.h
         src/TemplateManager.cpp
+        src/SettingsSafety.h
         src/PluginHost.h
         src/PluginHost.cpp
         src/ToneForgeLookAndFeel.h
@@ -201,6 +202,29 @@ target_link_libraries(AmpForgeTemplateControlMapTests
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags
 )
+
+juce_add_console_app(AmpForgePluginHostSwitchTests PRODUCT_NAME "AmpForgePluginHostSwitchTests")
+juce_generate_juce_header(AmpForgePluginHostSwitchTests)
+target_sources(AmpForgePluginHostSwitchTests PRIVATE tests/PluginHostSwitchTests.cpp src/PluginHost.cpp src/PluginChain.cpp src/PluginScanGuard.cpp src/TemplateManager.cpp src/ControlMap.cpp src/Preset.cpp)
+target_include_directories(AmpForgePluginHostSwitchTests PRIVATE src)
+target_compile_definitions(AmpForgePluginHostSwitchTests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(AmpForgePluginHostSwitchTests PRIVATE juce::juce_audio_processors juce::juce_gui_basics
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
+juce_add_console_app(AmpForgeSettingsSafetyTests PRODUCT_NAME "AmpForgeSettingsSafetyTests")
+juce_generate_juce_header(AmpForgeSettingsSafetyTests)
+target_sources(AmpForgeSettingsSafetyTests PRIVATE tests/SettingsSafetyTests.cpp src/SettingsSafety.h src/Preset.cpp src/TemplateManager.cpp src/ControlMap.cpp)
+target_include_directories(AmpForgeSettingsSafetyTests PRIVATE src)
+target_compile_definitions(AmpForgeSettingsSafetyTests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(AmpForgeSettingsSafetyTests PRIVATE juce::juce_audio_processors juce::juce_gui_basics
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
+
+juce_add_console_app(AmpForgePresetTests PRODUCT_NAME "AmpForgePresetTests")
+juce_generate_juce_header(AmpForgePresetTests)
+target_sources(AmpForgePresetTests PRIVATE tests/PresetTests.cpp src/Preset.cpp src/TemplateManager.cpp src/ControlMap.cpp)
+target_include_directories(AmpForgePresetTests PRIVATE src)
+target_link_libraries(AmpForgePresetTests PRIVATE juce::juce_audio_processors juce::juce_gui_basics
+    PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 
 if(MSVC)
     target_compile_options(AmpForge PRIVATE /EHa)

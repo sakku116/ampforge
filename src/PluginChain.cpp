@@ -35,6 +35,9 @@ public:
         auto partial = std::make_shared<PluginChain::SlotList>();
         bool allOk = true;
         const int total = specs.size();
+        for (const auto& spec : specs)
+            if (spec.slotId > 0)
+                localNextSlotId = std::max(localNextSlotId, spec.slotId + 1);
 
         for (int i = 0; i < total; ++i)
         {
@@ -52,7 +55,7 @@ public:
                                                          (int) spec.state.getSize());
 
                 slot->bypassed .store(spec.bypassed);
-                slot->postGain .store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
+                slot->postGain .store(spec.postGain >= 0.0f ? spec.postGain : 1.0f);
                 slot->customName = spec.customName;
 
                 if (spec.slotId > 0)
@@ -85,6 +88,7 @@ public:
             {
                 HostDebug::log("Loader thread: slot FAILED " + spec.description.name + " — " + error);
                 allOk = false;
+                break; // discard staged slots at completion; never publish a partial result
             }
 
             // Post progress to the message thread between each slot.
@@ -92,8 +96,11 @@ public:
             if (onProgress)
             {
                 auto cb = onProgress;
-                juce::MessageManager::callAsync([cb, loaded, total]() mutable {
-                    cb(loaded, total);
+                auto flag = aliveFlag;
+                auto* chain = &owner;
+                const int epoch = capturedEpoch;
+                juce::MessageManager::callAsync([cb, loaded, total, flag, chain, epoch]() mutable {
+                    if (flag->load() && chain->asyncEpoch.load() == epoch && cb) cb(loaded, total);
                 });
             }
         }
@@ -134,7 +141,7 @@ private:
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-PluginChain::PluginChain(juce::AudioPluginFormatManager& manager) : formatManager(manager)
+PluginChain::PluginChain(juce::AudioPluginFormatManager& manager, InstanceFactory factory) : formatManager(manager), instanceFactory(std::move(factory))
 {
     sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
 }
@@ -174,25 +181,20 @@ std::shared_ptr<PluginChain::Slot> PluginChain::createSlot(const juce::PluginDes
                                                           juce::String& error)
 {
     // Built outside the lock — instance creation hits disk and can be slow.
-    auto outcome = PluginScanGuard::createPluginInstance(formatManager,
-                                                         description,
-                                                         currentSampleRate,
-                                                         currentBlockSize);
-
-    if (outcome.crashed)
+    std::unique_ptr<juce::AudioPluginInstance> instance;
+    if (instanceFactory)
+        instance = instanceFactory(formatManager, description, currentSampleRate, currentBlockSize, error);
+    else
     {
-        error = "crashed: " + outcome.error;
-        return nullptr;
+        auto outcome = PluginScanGuard::createPluginInstance(formatManager, description, currentSampleRate, currentBlockSize);
+        if (outcome.crashed) error = "crashed: " + outcome.error;
+        else error = outcome.error;
+        instance = std::move(outcome.instance);
     }
-
-    if (outcome.instance == nullptr)
-    {
-        error = outcome.error;
-        return nullptr;
-    }
+    if (instance == nullptr) return nullptr;
 
     auto slot = std::make_shared<Slot>();
-    slot->instance = std::move(outcome.instance);
+    slot->instance = std::move(instance);
     slot->description = description;
     prepareSlot(*slot);
     return slot;
@@ -322,6 +324,14 @@ void PluginChain::reclaimRetired()
 
 bool PluginChain::addPlugin(const juce::PluginDescription& description, int targetSectionId)
 {
+    juce::Array<SlotSpec> allocation;
+    allocation.add({});
+    if (! canAllocateSlotIds(allocation, nextSlotId))
+    {
+        HostDebug::log("Chain add FAILED: slot ID counter exhausted");
+        return false;
+    }
+
     juce::String error;
     auto slot = createSlot(description, error);
 
@@ -410,6 +420,13 @@ bool PluginChain::duplicatePlugin(int index)
         auto cur = currentList();
         if (! juce::isPositiveAndBelow(index, (int) cur->size()))
             return false;
+        juce::Array<SlotSpec> allocation;
+        allocation.add({});
+        if (! canAllocateSlotIds(allocation, nextSlotId))
+        {
+            HostDebug::log("Duplicate FAILED: slot ID counter exhausted");
+            return false;
+        }
 
         const auto& src = (*cur)[(size_t) index];
         spec.description = src->description;
@@ -746,177 +763,85 @@ void PluginChain::activatePresetSlot(int slotIndex)
                    + " section=" + juce::String(targetSectionId));
 }
 
-std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<SlotSpec>& specs, bool& allOk)
+std::shared_ptr<PluginChain::SlotList> PluginChain::buildList(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections, int& proposedNextSlotId, bool& allOk)
 {
     auto list = std::make_shared<SlotList>();
-    allOk = true;
-
+    proposedNextSlotId = nextSlotId;
+    allOk = canAllocateSlotIds(specs, nextSlotId);
+    if (! allOk) return {};
+    for (const auto& spec : specs) if (spec.slotId > 0) proposedNextSlotId = std::max(proposedNextSlotId, spec.slotId + 1);
     for (const auto& spec : specs)
     {
         juce::String error;
         auto slot = createSlot(spec.description, error);
-
-        if (slot == nullptr)
-        {
-            HostDebug::log("Chain build: slot FAILED " + spec.description.name + " — " + error);
-            allOk = false;
-            continue;
-        }
-
-        if (spec.state.getSize() > 0)
-            slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
-
+        if (slot == nullptr) { HostDebug::log("Chain build: slot FAILED " + spec.description.name + " — " + error); allOk = false; return {}; }
+        if (spec.state.getSize() > 0) slot->instance->setStateInformation(spec.state.getData(), (int) spec.state.getSize());
         slot->bypassed.store(spec.bypassed);
-        slot->postGain.store(spec.postGain > 0.0f ? spec.postGain : 1.0f);
+        slot->postGain.store(spec.postGain >= 0.0f ? spec.postGain : 1.0f);
         slot->customName = spec.customName;
-
-        if (spec.slotId > 0)
-        {
-            slot->slotId = spec.slotId;
-            nextSlotId = std::max(nextSlotId, spec.slotId + 1);
-        }
-        else
-        {
-            slot->slotId = nextSlotId++;
-        }
-
-        // Validate sectionId; fall back to first section if unknown.
-        bool validSec = false;
-        for (const auto& def : sectionDefs)
-        {
-            if (def.id == spec.sectionId)
-            {
-                validSec = true;
-                slot->sectionBypassed.store(def.bypassed);
-                break;
-            }
-        }
-        slot->sectionId = validSec ? spec.sectionId : (sectionDefs.empty() ? 1 : sectionDefs[0].id);
-
+        slot->slotId = spec.slotId > 0 ? spec.slotId : proposedNextSlotId++;
+        bool valid = false;
+        for (const auto& def : sections) if (def.id == spec.sectionId) { valid = true; slot->sectionBypassed.store(def.bypassed); break; }
+        slot->sectionId = valid ? spec.sectionId : (sections.isEmpty() ? 1 : sections[0].id);
         list->push_back(std::move(slot));
     }
-
     return list;
 }
 
-bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs)
+juce::Array<PluginChain::SectionDef> PluginChain::currentSections() const
 {
-    cancelAsyncBuild();   // discard any in-progress async load
-    bool allOk = false;
-    auto next = buildList(specs, allOk);
-
-    {
-        const juce::ScopedLock sl(editLock);
-        publish(next);
-    }
-
-    HostDebug::log("Chain rebuilt: " + juce::String((int) next->size()) + " slot(s), allOk=" + juce::String((int) allOk));
-    return allOk;
+    juce::Array<SectionDef> result;
+    for (const auto& section : sectionDefs) result.add(section);
+    return result;
 }
 
-bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int crossfadeMs)
-{
-    bool allOk = false;
-    auto next = buildList(specs, allOk);   // built outside the lock
-
-    {
-        const juce::ScopedLock sl(editLock);
-
-        if (crossfadeMs <= 0)
-            publish(next);
-        else
-            publishWithCrossfade(next, crossfadeMs);
-    }
-
-    HostDebug::log("Chain switch (crossfade " + juce::String(crossfadeMs) + " ms): "
-                   + juce::String((int) next->size()) + " slot(s)");
-    return allOk;
-}
-
-bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs,
-                              const juce::Array<SectionDef>& sections)
-{
-    cancelAsyncBuild();   // discard any in-progress async load
-
-    // Replace section definitions first (message-thread only, no lock needed yet).
-    sectionDefs.clear();
-    for (const auto& s : sections)
-        sectionDefs.push_back(s);
-
-    if (sectionDefs.empty())
-        sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
-
-    // Recompute generation counters so future addSection() names don't collide.
-    nextSectionId   = 1;
-    nextStompCount  = 0;
-    nextPresetCount = 0;
-    for (const auto& def : sectionDefs)
-    {
-        nextSectionId = std::max(nextSectionId, def.id + 1);
-        if (def.type == SectionDef::Type::stomp) ++nextStompCount;
-        else                                     ++nextPresetCount;
-    }
-
-    bool allOk = false;
-    auto next = buildList(specs, allOk);   // built outside the lock
-
-    {
-        const juce::ScopedLock sl(editLock);
-        publish(next);
-    }
-
-    HostDebug::log("Chain rebuilt (" + juce::String(sections.size()) + " section(s)): "
-                   + juce::String((int) next->size()) + " slot(s), allOk=" + juce::String((int) allOk));
-    return allOk;
-}
-
-bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs,
-                                      const juce::Array<SectionDef>& sections,
-                                      int crossfadeMs)
+void PluginChain::adoptSections(const juce::Array<SectionDef>& sections)
 {
     sectionDefs.clear();
-    for (const auto& s : sections)
-        sectionDefs.push_back(s);
-
-    if (sectionDefs.empty())
-        sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
-
-    nextSectionId   = 1;
-    nextStompCount  = 0;
-    nextPresetCount = 0;
-    for (const auto& def : sectionDefs)
+    for (const auto& section : sections) sectionDefs.push_back(section);
+    if (sectionDefs.empty()) sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
+    nextSectionId = 1; nextStompCount = nextPresetCount = 0;
+    for (const auto& section : sectionDefs)
     {
-        nextSectionId = std::max(nextSectionId, def.id + 1);
-        if (def.type == SectionDef::Type::stomp) ++nextStompCount;
-        else                                     ++nextPresetCount;
+        nextSectionId = std::max(nextSectionId, section.id + 1);
+        if (section.type == SectionDef::Type::stomp) ++nextStompCount;
+        else ++nextPresetCount;
     }
-
-    bool allOk = false;
-    auto next = buildList(specs, allOk);   // built outside the lock
-
-    {
-        const juce::ScopedLock sl(editLock);
-        if (crossfadeMs <= 0)
-            publish(next);
-        else
-            publishWithCrossfade(next, crossfadeMs);
-    }
-
-    HostDebug::log("Chain switch with sections (crossfade " + juce::String(crossfadeMs) + " ms): "
-                   + juce::String((int) next->size()) + " slot(s)");
-    return allOk;
 }
 
-int PluginChain::preloadChain(const juce::Array<SlotSpec>& specs)
-{
-    bool allOk = false;
-    auto list = buildList(specs, allOk);   // built outside the lock
+bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs) { return rebuildFrom(specs, currentSections()); }
+bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, int ms) { return switchWithCrossfade(specs, currentSections(), ms); }
 
+bool PluginChain::rebuildFrom(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections)
+{
+    cancelAsyncBuild();
+    bool ok; int nextId; auto next = buildList(specs, sections, nextId, ok);
+    if (!ok) return false;
+    const juce::ScopedLock sl(editLock);
+    adoptSections(sections);
+    nextSlotId = nextId; publish(next); return true;
+}
+
+bool PluginChain::switchWithCrossfade(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections, int ms)
+{
+    bool ok; int nextId; auto next = buildList(specs, sections, nextId, ok);
+    if (!ok) return false;
+    const juce::ScopedLock sl(editLock);
+    adoptSections(sections);
+    nextSlotId = nextId;
+    if (ms <= 0) publish(next); else publishWithCrossfade(next, ms);
+    return true;
+}
+
+int PluginChain::preloadChain(const juce::Array<SlotSpec>& specs) { return preloadChain(specs, currentSections()); }
+
+int PluginChain::preloadChain(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections)
+{
+    bool ok; int nextId; auto list = buildList(specs, sections, nextId, ok);
+    if (!ok) return 0;
     const juce::ScopedLock sl(editLock);
     const int handle = nextPreloadHandle++;
-    preloaded[handle] = list;
-    HostDebug::log("Preloaded chain handle=" + juce::String(handle)
-                   + " (" + juce::String((int) list->size()) + " slots, allOk=" + juce::String((int) allOk) + ")");
+    preloaded[handle] = { std::move(list), sections, nextId };
     return handle;
 }
 
@@ -932,8 +857,11 @@ bool PluginChain::activateChain(int handle, int crossfadeMs)
         return false;
     }
 
-    auto list = it->second;
+    auto staged = std::move(it->second);
     preloaded.erase(it);
+    adoptSections(staged.sections);
+    nextSlotId = std::max(nextSlotId, staged.nextSlotId);
+    auto list = std::move(staged.slots);
 
     const double t0 = juce::Time::getMillisecondCounterHiRes();
 
@@ -950,6 +878,12 @@ bool PluginChain::activateChain(int handle, int crossfadeMs)
     return true;
 }
 
+bool PluginChain::hasPreload(int handle) const
+{
+    const juce::ScopedLock sl(editLock);
+    return preloaded.find(handle) != preloaded.end();
+}
+
 void PluginChain::releasePreload(int handle)
 {
     const juce::ScopedLock sl(editLock);
@@ -963,7 +897,16 @@ void PluginChain::buildChainAsync(const juce::Array<SlotSpec>& specs,
                                    std::function<void(int, int)> onProgress,
                                    std::function<void(int, bool)> onComplete)
 {
-    asyncEpoch.fetch_add(1);
+    const int requestEpoch = asyncEpoch.fetch_add(1) + 1;
+    if (! canAllocateSlotIds(specs, nextSlotId))
+    {
+        auto flag = loaderAliveFlag;
+        juce::MessageManager::callAsync([this, flag, requestEpoch, cb = std::move(onComplete)]
+        {
+            if (flag->load() && asyncEpoch.load() == requestEpoch && cb) cb(0, false);
+        });
+        return;
+    }
 
     // Move the old thread into the graveyard so it can finish its current slot naturally
     // (it will check asyncEpoch / threadShouldExit and exit without calling back).
@@ -982,7 +925,7 @@ void PluginChain::buildChainAsync(const juce::Array<SlotSpec>& specs,
     loaderThread = std::make_unique<PluginLoaderThread>(
         *this, loaderAliveFlag,
         specs, sections,
-        asyncEpoch.load(), nextSlotId,
+        requestEpoch, nextSlotId,
         std::move(onProgress), std::move(onComplete));
 
     loaderThread->startThread(juce::Thread::Priority::low);
@@ -1005,31 +948,17 @@ void PluginChain::commitAsyncBuild(const juce::Array<SectionDef>& targetSections
 
     if (asyncEpoch.load() != epoch)
         return;   // a newer build started — discard this result
-
-    // Commit section defs on the message thread.
-    sectionDefs.clear();
-    for (const auto& s : targetSections)
-        sectionDefs.push_back(s);
-    if (sectionDefs.empty())
-        sectionDefs.push_back({ 1, "Stomp 1", SectionDef::Type::stomp });
-
-    nextSectionId   = 1;
-    nextStompCount  = 0;
-    nextPresetCount = 0;
-    for (const auto& def : sectionDefs)
+    if (! allOk)
     {
-        nextSectionId = std::max(nextSectionId, def.id + 1);
-        if (def.type == SectionDef::Type::stomp) ++nextStompCount;
-        else                                     ++nextPresetCount;
+        if (onComplete) onComplete(0, false);
+        return;
     }
-
-    nextSlotId = std::max(nextSlotId, newNextSlotId);
 
     int handle;
     {
         const juce::ScopedLock sl(editLock);
         handle = nextPreloadHandle++;
-        preloaded[handle] = std::move(partial);
+        preloaded[handle] = { std::move(partial), targetSections, newNextSlotId };
     }
 
     HostDebug::log("Async chain build complete (background): handle=" + juce::String(handle)
@@ -1145,7 +1074,7 @@ void PluginChain::prepare(double sampleRate, int blockSize, int inputChannels, i
             prepareSlot(*slot);
 
     for (auto& entry : preloaded)      // keep preloaded chains ready at the current sr/bs
-        for (const auto& slot : *entry.second)
+        for (const auto& slot : *entry.second.slots)
             prepareSlot(*slot);
 
     processingChannelCount.store(computeChannelCount(*cur));

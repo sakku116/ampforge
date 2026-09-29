@@ -41,7 +41,7 @@ public:
     ControlMap getCurrentControlMapOr(const ControlMap& legacyMap) const;
 
     juce::ValueTree toValueTree() const;
-    void fromValueTree(const juce::ValueTree& tree);
+    bool fromValueTree(const juce::ValueTree& tree);
 
 private:
     std::vector<Scene> scenes;

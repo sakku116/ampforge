@@ -79,36 +79,56 @@ juce::ValueTree TemplateManager::toValueTree() const
     return root;
 }
 
-void TemplateManager::fromValueTree(const juce::ValueTree& tree)
+bool TemplateManager::fromValueTree(const juce::ValueTree& tree)
 {
-    clear();
+    if (! tree.hasType("SCENES")) return false;
 
-    if (! tree.hasType("SCENES"))
-        return;
-
-    currentIndex = (int) tree.getProperty("current", -1);
+    std::vector<Scene> restoredScenes;
+    int restoredCurrentIndex = -1;
+    if (tree.hasProperty("current"))
+    {
+        const auto current = tree.getProperty("current").toString();
+        if (current.isEmpty() || current != current.trim() || ! current.containsOnly("-0123456789"))
+            return false;
+        restoredCurrentIndex = current.getIntValue();
+        if (current != juce::String(restoredCurrentIndex))
+            return false;
+    }
 
     for (int i = 0; i < tree.getNumChildren(); ++i)
     {
         auto child = tree.getChild(i);
+        if (! child.hasType("TONEFORGE_PRESET"))
+            return false;
 
         Scene scene;
         scene.name = child.getProperty("name", "Template " + juce::String(i + 1)).toString();
-        Preset::fromValueTree(child, scene.specs, scene.sections);
+        auto chain = child.createCopy();
+        for (int j = chain.getNumChildren(); --j >= 0;)
+            if (chain.getChild(j).hasType("CONTROLMAP")) chain.removeChild(j, nullptr);
+        if (! Preset::fromValueTree(chain, scene.specs, scene.sections))
+            return false;
 
+        bool foundMap = false;
         for (int j = 0; j < child.getNumChildren(); ++j)
         {
             const auto sub = child.getChild(j);
             if (sub.hasType("CONTROLMAP"))
             {
-                scene.controlMap.fromValueTree(sub);
-                break;
+                if (foundMap || ! scene.controlMap.fromValueTree(sub)) return false;
+                foundMap = true;
             }
+            else if (! sub.hasType("SECTION") && ! sub.hasType("SLOT"))
+                return false;
         }
 
-        scenes.push_back(std::move(scene));
+        restoredScenes.push_back(std::move(scene));
     }
 
-    if (currentIndex >= (int) scenes.size())
-        currentIndex = (int) scenes.size() - 1;
+    if (restoredCurrentIndex < -1 || restoredCurrentIndex >= (int) restoredScenes.size())
+        return false;
+
+    scenes = std::move(restoredScenes);
+    currentIndex = restoredCurrentIndex;
+    return true;
 }

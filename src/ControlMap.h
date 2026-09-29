@@ -82,7 +82,7 @@ public:
     juce::Array<ExpressionTarget> matchExpressions(const juce::MidiMessage& message) const;
 
     juce::ValueTree toValueTree() const;
-    void fromValueTree(const juce::ValueTree& tree);
+    bool fromValueTree(const juce::ValueTree& tree);
 
 private:
     ControlAction match(const ControlTrigger& incoming) const;

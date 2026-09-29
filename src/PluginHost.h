@@ -9,7 +9,7 @@
 class PluginHost
 {
 public:
-    PluginHost();
+    explicit PluginHost(PluginChain::InstanceFactory factory = {});
     ~PluginHost();
 
     juce::AudioPluginFormatManager& getFormatManager() { return formatManager; }
@@ -64,7 +64,7 @@ public:
 
     // Preloaded switching (build ahead, then switch in <50 ms) — used by scenes.
     int  preloadChain(const juce::Array<PluginChain::SlotSpec>& specs) { return chain.preloadChain(specs); }
-    bool activatePreloaded(int handle, int crossfadeMs) { closeAllEditors(); return chain.activateChain(handle, crossfadeMs); }
+    bool activatePreloaded(int handle, int crossfadeMs) { if (! chain.hasPreload(handle)) return false; closeAllEditors(); return chain.activateChain(handle, crossfadeMs); }
     void releasePreload(int handle) { chain.releasePreload(handle); }
 
     /** Async version of switchChainWithCrossfade: returns immediately. Loads plugins one
@@ -80,6 +80,7 @@ public:
     // ── Editor ───────────────────────────────────────────────────────────────
     void openEditorWindow(int index);
     void closeAllEditors();
+    bool hasOpenEditor() const { return editorWindow != nullptr; }
 
     // ── Backwards-compatible single-plugin API (kept until UI is reworked) ────
     bool loadPlugin(const juce::PluginDescription& description, double sampleRate, int blockSize);

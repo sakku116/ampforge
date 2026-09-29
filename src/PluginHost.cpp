@@ -37,7 +37,7 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginEditorWindow)
 };
 
-PluginHost::PluginHost() : chain(formatManager)
+PluginHost::PluginHost(PluginChain::InstanceFactory factory) : chain(formatManager, std::move(factory))
 {
     formatManager.addDefaultFormats();
 }
@@ -83,29 +83,39 @@ void PluginHost::clearChain()
 
 bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs)
 {
+    cancelPendingSwitch();
+    const int handle = chain.preloadChain(specs);
+    if (handle <= 0) return false;
     closeAllEditors();
-    return chain.rebuildFrom(specs);
+    return chain.activateChain(handle, 0);
 }
 
 bool PluginHost::rebuildChain(const juce::Array<PluginChain::SlotSpec>& specs,
                               const juce::Array<PluginChain::SectionDef>& sections)
 {
+    cancelPendingSwitch();
+    const int handle = chain.preloadChain(specs, sections);
+    if (handle <= 0) return false;
     closeAllEditors();
-    return chain.rebuildFrom(specs, sections);
+    return chain.activateChain(handle, 0);
 }
 
 bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs, int crossfadeMs)
 {
+    const int handle = chain.preloadChain(specs);
+    if (handle <= 0) return false;
     closeAllEditors();
-    return chain.switchWithCrossfade(specs, crossfadeMs);
+    return chain.activateChain(handle, crossfadeMs);
 }
 
 bool PluginHost::switchChainWithCrossfade(const juce::Array<PluginChain::SlotSpec>& specs,
                                           const juce::Array<PluginChain::SectionDef>& sections,
                                           int crossfadeMs)
 {
+    const int handle = chain.preloadChain(specs, sections);
+    if (handle <= 0) return false;
     closeAllEditors();
-    return chain.switchWithCrossfade(specs, sections, crossfadeMs);
+    return chain.activateChain(handle, crossfadeMs);
 }
 
 void PluginHost::switchChainAsync(const juce::Array<PluginChain::SlotSpec>& specs,
@@ -113,16 +123,19 @@ void PluginHost::switchChainAsync(const juce::Array<PluginChain::SlotSpec>& spec
                                   int crossfadeMs,
                                   std::function<void(bool)> onComplete)
 {
-    closeAllEditors();
     chain.buildChainAsync(
         specs, sections,
         nullptr,   // onProgress — MainComponent accesses chain directly via getChain()
         [this, crossfadeMs, onComplete](int handle, bool allOk)
         {
-            if (handle > 0)
-                chain.activateChain(handle, crossfadeMs);
+            bool activated = false;
+            if (allOk && handle > 0)
+            {
+                closeAllEditors();
+                activated = chain.activateChain(handle, crossfadeMs);
+            }
             if (onComplete)
-                onComplete(allOk);
+                onComplete(activated);
         });
 }
 

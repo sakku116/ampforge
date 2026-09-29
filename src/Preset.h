@@ -30,11 +30,13 @@ namespace Preset
     bool saveToFile(const juce::Array<PluginChain::SlotSpec>& specs,
                     const juce::Array<PluginChain::SectionDef>& sections,
                     const juce::String& name,
-                    const juce::File& file);
+                    const juce::File& file,
+                    juce::String* error = nullptr);
 
     bool loadFromFile(const juce::File& file,
                       juce::Array<PluginChain::SlotSpec>& outSpecs,
-                      juce::Array<PluginChain::SectionDef>& outSections);
+                      juce::Array<PluginChain::SectionDef>& outSections,
+                      juce::String* error = nullptr);
 
     /** %APPDATA%/AmpForge/presets (created on demand). */
     juce::File getPresetsDirectory();

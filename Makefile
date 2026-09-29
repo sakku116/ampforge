@@ -63,7 +63,8 @@ run: build scan-worker
 	@echo "[*] Running Amp Forge ($(CONFIG))..."
 	@"$(EXE_PATH)"
 
-run-release: release scan-worker
+run-release: release
+	@$(MAKE) scan-worker CONFIG=Release
 	@echo "[*] Running Amp Forge (Release)..."
 	@"$(BUILD_DIR)/AmpForge_artefacts/Release/Amp Forge.exe"
 

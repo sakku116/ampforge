@@ -2,6 +2,7 @@
 #include "AppDataDir.h"
 #include "HostDebug.h"
 #include "Preset.h"
+#include "SettingsSafety.h"
 #include <algorithm>
 
 MainComponent::MainComponent()
@@ -221,12 +222,14 @@ MainComponent::MainComponent()
     deleteTemplateButton .setTooltip("Delete — remove the active template");
     prevTemplateButton   .setTooltip("Previous template");
     nextTemplateButton   .setTooltip("Next template");
+    settingsRecoveryButton.setTooltip("Retry loading repaired settings or explicitly reset saved settings");
+    settingsRecoveryButton.setVisible(false);
 
     for (auto* b : { &audioSettingsButton, &scanButton, &scanPathsButton, &addButton,
                      &savePresetButton, &loadPresetButton,
                      &captureTemplateButton, &updateTemplateButton, &renameTemplateButton,
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
-                     &addSectionStompButton, &addSectionPresetButton,
+                     &settingsRecoveryButton, &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton,
                      &clearMapsButton,
                      &globalKeysButton })
@@ -251,6 +254,7 @@ MainComponent::MainComponent()
                                 "Ctrl+Shift+F11 disables capture from anywhere.\n"
                                 "Session-only: always starts OFF and is never saved.");
     setGlobalKeysUi(false);
+    updateSettingsSafetyUi();
 
     templateSelector.setTextWhenNothingSelected("(no templates)");
     templateSelector.onChange = [this]
@@ -453,12 +457,14 @@ MainComponent::MainComponent()
 
         // Restore scenes first so we know whether an active scene should own the chain.
         restoreTemplates();
-        restoreControlMap();
+        if (templatesRestoreFailed)
+            return; // Leave the chain empty; do not fall back to a saved preset.
 
         const int activeScene = templateManager.getCurrentIndex();
-
+        ControlMap fallbackMap;
         {
             std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            fallbackMap = controlMap;
             controlMap = templateManager.getCurrentControlMapOr(controlMap);
         }
         updateControlLabel();
@@ -471,10 +477,22 @@ MainComponent::MainComponent()
             pluginHost.getChain().buildChainAsync(
                 scene.specs, scene.sections,
                 [this](int loaded, int total) { setChainLoading(true, loaded, total); },
-                [this, activeScene](int handle, bool allOk)
+                [this, activeScene, fallbackMap](int handle, bool allOk)
                 {
-                    if (handle > 0)
+                    if (handle > 0 && allOk)
                         pluginHost.getChain().activateChain(handle, 0);
+                    else
+                    {
+                        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+                        controlMap = fallbackMap;
+                        templateManager.setCurrentIndex(-1);
+                        recoveredSettings.begin();
+                        updateControlLabel();
+                        refreshTemplateSelector();
+                        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                            "Template Restore Failed", "A plugin could not be loaded. The chain was left empty.\n"
+                            "Automatic settings saves are paused until you successfully select or save a Template.");
+                    }
                     setChainLoading(false, 0, 0);
                     refreshChainList();
                     HostDebug::log("Startup: applied template " + juce::String(activeScene)
@@ -491,6 +509,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    templateRecallController.cancel();
+    pluginHost.cancelPendingSwitch();
 
     // Global Keyboard Capture teardown: the controller releases ownership and the
     // adapter removes the hook, so normal keyboard behavior is restored even if
@@ -508,19 +528,19 @@ MainComponent::~MainComponent()
                      &savePresetButton, &loadPresetButton,
                      &captureTemplateButton, &updateTemplateButton, &renameTemplateButton,
                      &deleteTemplateButton, &prevTemplateButton, &nextTemplateButton,
-                     &addSectionStompButton, &addSectionPresetButton,
+                     &settingsRecoveryButton, &addSectionStompButton, &addSectionPresetButton,
                      &learnExprButton, &clearMapsButton,
                      &globalKeysButton,
                      &chainViewToggleButton })
         b->removeListener(this);
 
     audioSettingsWindow.reset();
-    saveTemplates();
+    saveTemplates(false);
     saveControlMap();
     pluginHost.clearChain();
     saveAudioDeviceState();
     audioEngine.stop();
-    appProperties.saveIfNeeded();
+    SettingsSafety::saveIfAllowed(appProperties, settingsWritesBlocked());
 
     setLookAndFeel(nullptr);
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
@@ -612,6 +632,7 @@ void MainComponent::resized()
             sceneRow.removeFromLeft(4);
         }
         templateDirtyLabel.setBounds(sceneRow.removeFromLeft(88));
+        settingsRecoveryButton.setBounds(sceneRow.removeFromRight(112));
 
         footerSep1Y = f.getY() + 3;   // midpoint of the 6px gap below templates
         f.removeFromTop(6);
@@ -735,6 +756,8 @@ void MainComponent::buttonClicked(juce::Button* button)
     if (button == &updateTemplateButton)  { updateTemplate();         return; }
     if (button == &renameTemplateButton)  { renameCurrentTemplate();  return; }
     if (button == &deleteTemplateButton)  { deleteTemplate();         return; }
+    if (button == &settingsRecoveryButton) { showSettingsRecoveryDialog(
+        appProperties.getUserSettings()->getFile().getFullPathName()); return; }
     if (button == &prevTemplateButton)    { stepTemplate(-1);         return; }
     if (button == &nextTemplateButton)    { stepTemplate(+1);         return; }
 
@@ -922,6 +945,7 @@ void MainComponent::executeAction(const ControlAction& action)
 
 void MainComponent::captureTemplate()
 {
+    if (blockProtectedTemplateAction() || chainIsLoading) return;
     const auto name = "Template " + juce::String(templateManager.getNumScenes() + 1);
     const int idx = templateManager.addScene(name, pluginHost.captureChain(), pluginHost.captureSectionDefs());
     templateManager.setCurrentIndex(idx);
@@ -930,16 +954,17 @@ void MainComponent::captureTemplate()
         controlMap.clear();
     }
     refreshTemplateSelector();
-    saveTemplates();
-    saveControlMap();
+    const bool saved = saveTemplates();
+    if (saved) saveControlMap();
     updateControlLabel();
     refreshChainList();
-    setTemplateDirty(false);
+    setTemplateDirty(! saved);
     HostDebug::log("Template captured: " + name + " (" + juce::String(pluginHost.getNumSlots()) + " slots)");
 }
 
 void MainComponent::updateTemplate()
 {
+    if (blockProtectedTemplateAction() || chainIsLoading) return;
     const int idx = templateManager.getCurrentIndex();
 
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
@@ -951,13 +976,13 @@ void MainComponent::updateTemplate()
         mapCopy = controlMap;
     }
     templateManager.replaceScene(idx, pluginHost.captureChain(), pluginHost.captureSectionDefs(), mapCopy);
-    saveTemplates();
-    setTemplateDirty(false);
+    setTemplateDirty(! saveTemplates());
     HostDebug::log("Template updated: index " + juce::String(idx));
 }
 
 void MainComponent::renameCurrentTemplate()
 {
+    if (blockProtectedTemplateAction() || chainIsLoading) return;
     const int idx = templateManager.getCurrentIndex();
 
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
@@ -982,7 +1007,7 @@ void MainComponent::renameCurrentTemplate()
                 {
                     templateManager.renameScene(idx, newName);
                     refreshTemplateSelector();
-                    saveTemplates();
+                    setTemplateDirty(! saveTemplates());
                     HostDebug::log("Template renamed: index " + juce::String(idx) + " -> \"" + newName + "\"");
                 }
             }
@@ -992,6 +1017,7 @@ void MainComponent::renameCurrentTemplate()
 
 void MainComponent::deleteTemplate()
 {
+    if (blockProtectedTemplateAction() || chainIsLoading) return;
     const int idx = templateManager.getCurrentIndex();
 
     if (! juce::isPositiveAndBelow(idx, templateManager.getNumScenes()))
@@ -999,45 +1025,45 @@ void MainComponent::deleteTemplate()
 
     templateManager.removeScene(idx);
     refreshTemplateSelector();
-    saveTemplates();
-    setTemplateDirty(false);
+    setTemplateDirty(! saveTemplates());
     HostDebug::log("Template deleted: index " + juce::String(idx));
 }
 
-void MainComponent::recallTemplate(int index)
+void MainComponent::recallTemplate(int index, bool explicitAction)
 {
-    if (! juce::isPositiveAndBelow(index, templateManager.getNumScenes()))
+    if (blockProtectedTemplateAction() || ! juce::isPositiveAndBelow(index, templateManager.getNumScenes()))
         return;
 
-    templateManager.setCurrentIndex(index);
-    const auto& scene = templateManager.getScene(index);
+    const int total = templateManager.getScene(index).specs.size();
+    refreshTemplateSelector(); // undo ComboBox's optimistic selection until activation succeeds
+    setChainLoading(true, 0, total);
 
-    // Apply the template's own control map immediately.
-    {
-        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
-        controlMap = scene.controlMap;
-    }
-    saveControlMap();
-    updateControlLabel();
-
-    pluginHost.cancelPendingSwitch();
-    setChainLoading(true, 0, scene.specs.size());
-
-    pluginHost.switchChainAsync(
-        scene.specs, scene.sections, 25,
-        [this, index](bool allOk)
+    templateRecallController.recall(pluginHost, templateManager, controlMap, controlMapMutex, templateDirty, index,
+        [this, index, explicitAction](bool activated)
         {
             setChainLoading(false, 0, 0);
-            refreshChainList();
-            refreshTemplateSelector();
-            setTemplateDirty(false);
-            HostDebug::log("Template recalled: index " + juce::String(index)
-                           + " (allOk=" + juce::String((int) allOk) + ")");
+            if (activated)
+            {
+                if (explicitAction) recoveredSettings.commitExplicitly();
+                saveControlMap();
+                updateControlLabel();
+                refreshChainList();
+                setTemplateDirty(templateSaveState.hasFailed());
+                refreshTemplateSelector();
+                HostDebug::log("Template recalled: index " + juce::String(index));
+            }
+            else
+            {
+                refreshTemplateSelector();
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Template Load Failed", "A plugin could not be loaded. The playing chain and controls were kept.");
+            }
         });
 }
 
 void MainComponent::stepTemplate(int delta)
 {
+    if (blockProtectedTemplateAction()) return;
     const int n = templateManager.getNumScenes();
 
     if (n == 0)
@@ -1063,15 +1089,44 @@ void MainComponent::refreshTemplateSelector()
         templateSelector.setSelectedId(cur + 1, juce::dontSendNotification);
 }
 
-void MainComponent::saveTemplates()
+bool MainComponent::blockProtectedTemplateAction()
 {
-    if (auto* settings = appProperties.getUserSettings())
-    {
-        if (auto xml = templateManager.toValueTree().createXml())
-            settings->setValue(templatesStateKey, xml.get());
+    if (! settingsUnsafe) return false;
+    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+        "Settings Protected", "Repair or reset saved settings before changing Templates.");
+    return true;
+}
 
-        settings->saveIfNeeded();
+void MainComponent::updateSettingsSafetyUi()
+{
+    settingsRecoveryButton.setVisible(settingsUnsafe);
+    resized();
+}
+
+bool MainComponent::saveTemplates(bool reportFailure)
+{
+    if (settingsUnsafe || templatesRestoreFailed || (! reportFailure && settingsWritesBlocked()))
+        return false;
+
+    auto* settings = appProperties.getUserSettings();
+    if (settings == nullptr)
+        return false;
+    const auto notify = [path = settings->getFile().getFullPathName()](SettingsSafety::Warning warning)
+    {
+        if (warning == SettingsSafety::Warning::templateSaveFailed)
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Template Save Failed", "Could not save Templates to:\n" + path
+                    + "\nAutomatic settings saves are paused until you successfully save a Template.");
+    };
+    if (templateSaveState.save(*settings, templateManager, reportFailure, notify))
+    {
+        if (reportFailure) recoveredSettings.commitExplicitly();
+        setTemplateDirty(templateDirty);
+        return true;
     }
+    setTemplateDirty(templateDirty);
+    HostDebug::log("Template save failed: " + settings->getFile().getFullPathName());
+    return false;
 }
 
 void MainComponent::restoreTemplates()
@@ -1081,12 +1136,137 @@ void MainComponent::restoreTemplates()
     if (settings == nullptr)
         return;
 
-    if (auto xml = settings->getXmlValue(templatesStateKey))
+    const auto path = settings->getFile().getFullPathName();
+    ControlMap legacyMap;
+    const auto result = SettingsSafety::restore(*settings, templateManager, &legacyMap,
+        [this, path](SettingsSafety::Warning warning)
+        {
+            if (warning == SettingsSafety::Warning::unreadableSettings)
+            {
+                HostDebug::log("Templates restore failed; preserving " + path);
+                showSettingsRecoveryDialog(path);
+            }
+        });
+    templatesRestoreFailed = result == SettingsSafety::RestoreResult::invalid;
+    settingsUnsafe = templatesRestoreFailed;
+    SettingsSafety::protectIfInvalid(*settings, result);
+    updateSettingsSafetyUi();
+    if (templatesRestoreFailed)
+        return;
+    if (settings->containsKey(controlMapStateKey))
     {
-        templateManager.fromValueTree(juce::ValueTree::fromXml(*xml));
+        {
+            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+            controlMap = std::move(legacyMap);
+        }
+        updateControlLabel();
+        HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
+    }
+    if (result == SettingsSafety::RestoreResult::restored)
+    {
         refreshTemplateSelector();
         HostDebug::log("Templates restored: " + juce::String(templateManager.getNumScenes()));
     }
+}
+
+void MainComponent::showSettingsRecoveryDialog(const juce::String& path)
+{
+    auto* dialog = new juce::AlertWindow("Saved Settings Unreadable",
+        "Automatic settings writes are disabled to preserve this file:\n" + path,
+        juce::MessageBoxIconType::WarningIcon);
+    dialog->addButton("Retry after repair", 1);
+    dialog->addButton("Reset saved settings...", 2);
+    dialog->addButton("Cancel", 0);
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+    dialog->enterModalState(true, juce::ModalCallbackFunction::create(
+        [safeThis, path](int choice)
+        {
+            if (safeThis == nullptr) return;
+            if (choice == 1) safeThis->retrySettingsRecovery();
+            else if (choice == 2) safeThis->confirmSettingsReset(path);
+        }), true);
+}
+
+void MainComponent::retrySettingsRecovery()
+{
+    if (pluginHost.getNumSlots() > 0)
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Recovery Requires an Empty Chain", "Clear the live chain before retrying; recovered settings may activate a saved Template.");
+        return;
+    }
+
+    TemplateManager restored;
+    ControlMap legacyMap;
+    if (SettingsSafety::refresh(appProperties, restored, &legacyMap) == SettingsSafety::RestoreResult::invalid)
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Recovery Failed", "The settings file is still invalid:\n" + settingsOptions.getDefaultFile().getFullPathName());
+        return;
+    }
+    const int savedSelection = restored.getCurrentIndex();
+    restored.setCurrentIndex(-1);
+    templateManager = std::move(restored);
+    {
+        std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
+        controlMap = std::move(legacyMap);
+    }
+    settingsUnsafe = templatesRestoreFailed = false;
+    recoveredSettings.begin(); // preserve repaired bytes until retry completes or the user explicitly saves
+    updateSettingsSafetyUi();
+    refreshTemplateSelector();
+    updateControlLabel();
+    if (juce::isPositiveAndBelow(savedSelection, templateManager.getNumScenes()))
+    {
+        const int total = templateManager.getScene(savedSelection).specs.size();
+        setChainLoading(true, 0, total);
+        templateRecallController.recall(pluginHost, templateManager, controlMap, controlMapMutex, templateDirty,
+            savedSelection, [this](bool activated)
+            {
+                recoveredSettings.finishRetry(true, activated);
+                setChainLoading(false, 0, 0);
+                refreshChainList();
+                refreshTemplateSelector();
+                updateControlLabel();
+                if (! activated)
+                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                        "Template Recovery Incomplete", "The repaired settings were retained, but a plugin could not load.\n"
+                        "Automatic settings saves are paused until you successfully select or save a Template.");
+            });
+    }
+    else
+    {
+        recoveredSettings.finishRetry(false, false);
+        tryRestoreLastPreset();
+    }
+}
+
+void MainComponent::confirmSettingsReset(const juce::String& path)
+{
+    juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::WarningIcon,
+        "Reset Saved Settings?", "This will replace saved Templates and configuration in:\n" + path
+            + "\nSaved configuration may be lost.",
+        "Reset", "Cancel", nullptr, juce::ModalCallbackFunction::create([safeThis = juce::Component::SafePointer<MainComponent>(this)](int result)
+        {
+            if (safeThis == nullptr || result != 1) return;
+            auto* settings = safeThis->appProperties.getUserSettings();
+            if (settings == nullptr || ! SettingsSafety::reset(*settings))
+            {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Reset Failed", "Could not write replacement settings. The saved file remains protected.");
+                return;
+            }
+            safeThis->templateManager.clear();
+            {
+                std::lock_guard<std::recursive_mutex> lock(safeThis->controlMapMutex);
+                safeThis->controlMap = ControlMap{};
+            }
+            safeThis->settingsUnsafe = safeThis->templatesRestoreFailed = false;
+            safeThis->recoveredSettings.commitExplicitly();
+            safeThis->updateSettingsSafetyUi();
+            safeThis->refreshTemplateSelector();
+            safeThis->updateControlLabel();
+        }));
 }
 
 void MainComponent::bindingLearnComplete(const ControlTrigger& trigger, const ControlAction& action)
@@ -1283,9 +1463,13 @@ void MainComponent::updateControllerStatus()
 void MainComponent::setTemplateDirty(bool dirty)
 {
     templateDirty = dirty;
-    templateDirtyLabel.setVisible(dirty);
+    const bool unsaved = SettingsSafety::showTemplateUnsaved(dirty, templateSaveState.hasFailed());
+    templateDirtyLabel.setText(templateSaveState.hasFailed()
+        ? juce::String::fromUTF8("\xe2\x97\x8f save failed")
+        : juce::String::fromUTF8("\xe2\x97\x8f modified"), juce::dontSendNotification);
+    templateDirtyLabel.setVisible(unsaved);
 
-    if (dirty)
+    if (unsaved)
     {
         updateTemplateButton.setColour(juce::TextButton::buttonColourId, tf::colour::warn.withAlpha(0.25f));
         updateTemplateButton.setColour(juce::TextButton::textColourOffId, tf::colour::warn);
@@ -1314,6 +1498,7 @@ void MainComponent::setChainLoading(bool loading, int loaded, int total)
 
 void MainComponent::saveControlMap()
 {
+    if (settingsWritesBlocked()) return;
     if (auto* settings = appProperties.getUserSettings())
     {
         juce::ValueTree tree;
@@ -1322,27 +1507,9 @@ void MainComponent::saveControlMap()
             tree = controlMap.toValueTree();
         }
         if (auto xml = tree.createXml())
-            settings->setValue(controlMapStateKey, xml.get());
+            SettingsSafety::setValue(*settings, settingsUnsafe, controlMapStateKey, xml.get());
 
         settings->saveIfNeeded();
-    }
-}
-
-void MainComponent::restoreControlMap()
-{
-    auto* settings = appProperties.getUserSettings();
-
-    if (settings == nullptr)
-        return;
-
-    if (auto xml = settings->getXmlValue(controlMapStateKey))
-    {
-        {
-            std::lock_guard<std::recursive_mutex> lock(controlMapMutex);
-            controlMap.fromValueTree(juce::ValueTree::fromXml(*xml));
-        }
-        updateControlLabel();
-        HostDebug::log("Control map restored: " + juce::String(controlMap.getNumBindings()) + " binding(s)");
     }
 }
 
@@ -1366,10 +1533,11 @@ void MainComponent::openScanPaths()
 
 void MainComponent::saveScanPaths(const juce::StringArray& paths)
 {
+    if (settingsWritesBlocked()) return;
     auto* settings = appProperties.getUserSettings();
     if (settings == nullptr) return;
 
-    settings->setValue(pluginScanPathsKey, paths.joinIntoString("\n"));
+    SettingsSafety::setValue(*settings, settingsUnsafe, pluginScanPathsKey, paths.joinIntoString("\n"));
     settings->saveIfNeeded();
     HostDebug::log("Scan paths saved: " + juce::String(paths.size()) + " path(s)");
 }
@@ -1406,9 +1574,10 @@ void MainComponent::restoreChainViewMode()
 
 void MainComponent::saveChainViewMode()
 {
+    if (settingsWritesBlocked()) return;
     if (auto* settings = appProperties.getUserSettings())
     {
-        settings->setValue(chainViewModeKey, chainHorizontalMode);
+        SettingsSafety::setValue(*settings, settingsUnsafe, chainViewModeKey, chainHorizontalMode);
         settings->saveIfNeeded();
     }
 }
@@ -1447,9 +1616,10 @@ void MainComponent::restoreInputChannel()
 
 void MainComponent::saveInputChannel()
 {
+    if (settingsWritesBlocked()) return;
     if (auto* settings = appProperties.getUserSettings())
     {
-        settings->setValue(inputChannelIndexKey, audioEngine.getInputChannelIndex());
+        SettingsSafety::setValue(*settings, settingsUnsafe, inputChannelIndexKey, audioEngine.getInputChannelIndex());
         settings->saveIfNeeded();
     }
 }
@@ -1888,9 +2058,13 @@ void MainComponent::savePreset()
 
         const auto specs    = pluginHost.captureChain();
         const auto sections = pluginHost.captureSectionDefs();
+        juce::String error;
 
-        if (Preset::saveToFile(specs, sections, file.getFileNameWithoutExtension(), file))
+        if (Preset::saveToFile(specs, sections, file.getFileNameWithoutExtension(), file, &error))
             saveLastPresetPath(file);
+        else
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                "Preset Save Failed", error + "\n" + file.getFullPathName());
     });
 }
 
@@ -1917,13 +2091,34 @@ void MainComponent::loadPreset()
 
 void MainComponent::loadPresetFile(const juce::File& file)
 {
+    templateRecallController.cancel();
+    pluginHost.cancelPendingSwitch();
+    setChainLoading(false, 0, 0);
+    refreshTemplateSelector();
+
     juce::Array<PluginChain::SlotSpec> specs;
     juce::Array<PluginChain::SectionDef> sections;
 
-    if (! Preset::loadFromFile(file, specs, sections))
+    juce::String error;
+    if (! SettingsSafety::loadPreset(file, specs, sections,
+        [path = file.getFullPathName(), &error](SettingsSafety::Warning warning)
+        {
+            if (warning == SettingsSafety::Warning::damagedPreset)
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Preset Load Failed", error + "\n" + path);
+        }, &error))
+    {
         return;
+    }
 
-    pluginHost.switchChainWithCrossfade(specs, sections, 25);   // smooth, click-free preset switch
+    if (! pluginHost.switchChainWithCrossfade(specs, sections, 25))
+    {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+            "Preset Load Failed", "A plugin could not be loaded. The playing chain was kept.\n"
+                + file.getFullPathName());
+        return;
+    }
+
     refreshChainList();
     saveLastPresetPath(file);
     HostDebug::log("Preset applied: " + file.getFileName());
@@ -1934,9 +2129,10 @@ void MainComponent::loadPresetFile(const juce::File& file)
 
 void MainComponent::saveLastPresetPath(const juce::File& file)
 {
+    if (settingsWritesBlocked()) return;
     if (auto* settings = appProperties.getUserSettings())
     {
-        settings->setValue(lastPresetPathKey, file.getFullPathName());
+        SettingsSafety::setValue(*settings, settingsUnsafe, lastPresetPathKey, file.getFullPathName());
         settings->saveIfNeeded();
     }
 }
@@ -1948,35 +2144,53 @@ void MainComponent::tryRestoreLastPreset()
     if (settings == nullptr)
         return;
 
-    const auto path = settings->getValue(lastPresetPathKey);
-
-    if (path.isEmpty())
+    juce::File file;
+    const auto result = SettingsSafety::resolveLastPreset(*settings, lastPresetPathKey, file,
+        [path = settings->getValue(lastPresetPathKey)](SettingsSafety::Warning warning)
+        {
+            if (warning == SettingsSafety::Warning::missingPreset)
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                    "Preset Restore Failed", "Preset file does not exist.\n" + path);
+        });
+    if (result == SettingsSafety::PresetPathResult::none)
     {
         HostDebug::log("Restore preset: none saved");
         return;
     }
-
-    const juce::File file(path);
-
-    if (! file.existsAsFile())
+    if (result == SettingsSafety::PresetPathResult::missing)
     {
-        HostDebug::log("Restore preset: file missing — " + path);
+        HostDebug::log("Restore preset: file missing — " + file.getFullPathName());
+        // resolveLastPreset emits the warning through its notifier.
         return;
     }
-
-    HostDebug::log("Restore preset: loading " + path);
+    HostDebug::log("Restore preset: loading " + file.getFullPathName());
     loadPresetFile(file);
+}
+
+void MainComponent::saveWindowState(const juce::String& state)
+{
+    if (settingsWritesBlocked()) return;
+    if (auto* settings = appProperties.getUserSettings())
+        SettingsSafety::setValue(*settings, settingsUnsafe, "windowState", state);
 }
 
 void MainComponent::initialiseSettings()
 {
-    juce::PropertiesFile::Options options;
-    options.applicationName = "AmpForge";
-    options.filenameSuffix = "settings";
-    options.folderName = AppDataDir::get().getFullPathName();
-    options.storageFormat = juce::PropertiesFile::storeAsXML;
+    settingsOptions.applicationName = "AmpForge";
+    settingsOptions.filenameSuffix = "settings";
+    settingsOptions.folderName = AppDataDir::get().getFullPathName();
+    settingsOptions.storageFormat = juce::PropertiesFile::storeAsXML;
 
-    appProperties.setStorageParameters(options);
+    appProperties.setStorageParameters(settingsOptions);
+    // Preflight before audio/UI setup can save; restoreTemplates rechecks after the async scan.
+    if (auto* settings = appProperties.getUserSettings())
+    {
+        const auto result = SettingsSafety::restore(*settings, templateManager);
+        settingsUnsafe = result == SettingsSafety::RestoreResult::invalid;
+        if (settingsUnsafe)
+            templatesRestoreFailed = true;
+        SettingsSafety::protectIfInvalid(*settings, result);
+    }
 }
 
 void MainComponent::openAudioSettings()
@@ -1998,13 +2212,14 @@ void MainComponent::openAudioSettings()
 
 void MainComponent::saveAudioDeviceState()
 {
+    if (settingsWritesBlocked()) return;
     auto* settings = appProperties.getUserSettings();
 
     if (settings == nullptr)
         return;
 
     if (auto stateXml = audioEngine.saveDeviceState())
-        settings->setValue(audioDeviceStateKey, stateXml.get());
+        SettingsSafety::setValue(*settings, settingsUnsafe, audioDeviceStateKey, stateXml.get());
 
     settings->saveIfNeeded();
 }

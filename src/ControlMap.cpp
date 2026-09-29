@@ -195,36 +195,53 @@ juce::ValueTree ControlMap::toValueTree() const
     return root;
 }
 
-void ControlMap::fromValueTree(const juce::ValueTree& tree)
+bool ControlMap::fromValueTree(const juce::ValueTree& tree)
 {
-    bindings.clear();
-    expressions.clear();
-
     if (! tree.hasType("CONTROLMAP"))
-        return;
+        return false;
 
+    const auto integer = [](const juce::ValueTree& node, const char* key, int& out)
+    {
+        if (! node.hasProperty(key)) return false;
+        const auto text = node.getProperty(key).toString();
+        if (! text.containsOnly("-0123456789") || text.isEmpty()) return false;
+        out = text.getIntValue();
+        return text == juce::String(out);
+    };
+    std::vector<ControlBinding> newBindings;
+    std::vector<ExpressionBinding> newExpressions;
     for (int i = 0; i < tree.getNumChildren(); ++i)
     {
-        auto node = tree.getChild(i);
-
+        const auto node = tree.getChild(i);
+        if (node.getNumChildren() != 0) return false;
         if (node.hasType("BINDING"))
         {
-            ControlBinding binding;
-            binding.trigger.type    = (ControlTrigger::Type) (int) node.getProperty("trigType");
-            binding.trigger.channel = (int) node.getProperty("trigChannel");
-            binding.trigger.number  = (int) node.getProperty("trigNumber");
-            binding.action.type     = (ControlAction::Type) (int) node.getProperty("actType");
-            binding.action.index    = (int) node.getProperty("actIndex");
-            bindings.push_back(binding);
+            ControlBinding b;
+            int trigger = 0, action = 0;
+            if (! integer(node, "trigType", trigger) || ! integer(node, "trigChannel", b.trigger.channel)
+                || ! integer(node, "trigNumber", b.trigger.number) || ! integer(node, "actType", action)
+                || ! integer(node, "actIndex", b.action.index)) return false;
+            if (trigger < 1 || trigger > 4 || action < 1 || action > 5
+                || b.trigger.channel < 0 || b.trigger.channel > 16 || b.trigger.number < 0
+                || b.trigger.number > (trigger == 4 ? 0x00ffffff : 127)
+                || (trigger == 4 && b.trigger.channel != 0) || b.action.index < 0)
+                return false;
+            b.trigger.type = (ControlTrigger::Type) trigger;
+            b.action.type = (ControlAction::Type) action;
+            newBindings.push_back(b);
         }
         else if (node.hasType("EXPR"))
         {
             ExpressionBinding e;
-            e.channel    = (int) node.getProperty("channel");
-            e.ccNumber   = (int) node.getProperty("cc");
-            e.slotIndex  = (int) node.getProperty("slot");
-            e.paramIndex = (int) node.getProperty("param");
-            expressions.push_back(e);
+            if (! integer(node, "channel", e.channel) || ! integer(node, "cc", e.ccNumber)
+                || ! integer(node, "slot", e.slotIndex) || ! integer(node, "param", e.paramIndex)
+                || e.channel < 0 || e.channel > 16 || e.ccNumber < 0 || e.ccNumber > 127
+                || e.slotIndex < 0 || e.paramIndex < 0) return false;
+            newExpressions.push_back(e);
         }
+        else return false;
     }
+    bindings = std::move(newBindings);
+    expressions = std::move(newExpressions);
+    return true;
 }

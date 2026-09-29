@@ -1,7 +1,9 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <algorithm>
 #include <atomic>
+#include <limits>
 #include <map>
 #include <memory>
 #include <vector>
@@ -53,8 +55,21 @@ public:
         float        postGain  = 1.0f;  // slot output gain (linear)
     };
 
-    explicit PluginChain(juce::AudioPluginFormatManager& formatManager);
+    using InstanceFactory = std::function<std::unique_ptr<juce::AudioPluginInstance>(juce::AudioPluginFormatManager&, const juce::PluginDescription&, double, int, juce::String&)>;
+    explicit PluginChain(juce::AudioPluginFormatManager& formatManager, InstanceFactory factory = {});
     ~PluginChain();
+    static bool canAllocateSlotIds(const juce::Array<SlotSpec>& specs, int nextId)
+    {
+        if (nextId < 1) return false;
+        int64_t next = nextId, missing = 0;
+        for (const auto& spec : specs)
+        {
+            if (spec.slotId < 0) return false;
+            if (spec.slotId == 0) ++missing;
+            else next = std::max(next, (int64_t) spec.slotId + 1);
+        }
+        return next + missing < std::numeric_limits<int>::max();
+    }
 
     // ── Section management (message thread) ─────────────────────────────────
     int  addSection(SectionDef::Type type);
@@ -105,9 +120,11 @@ public:
 
     /** Builds a chain ahead of the switch moment; returns a handle (>0). */
     int  preloadChain(const juce::Array<SlotSpec>& specs);
+    int  preloadChain(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections);
     /** Crossfade-switches to a previously preloaded chain (instant if crossfadeMs<=0).
         The instances are already built, so this is the <50 ms switch path. */
     bool activateChain(int handle, int crossfadeMs);
+    bool hasPreload(int handle) const;
     void releasePreload(int handle);
 
     /** Async build on a background thread: loads all plugins without blocking the message
@@ -158,7 +175,9 @@ private:
 
     std::shared_ptr<Slot> createSlot(const juce::PluginDescription& description, juce::String& error);
     void prepareSlot(Slot& slot);
-    std::shared_ptr<SlotList> buildList(const juce::Array<SlotSpec>& specs, bool& allOk);
+    std::shared_ptr<SlotList> buildList(const juce::Array<SlotSpec>& specs, const juce::Array<SectionDef>& sections, int& proposedNextSlotId, bool& allOk);
+    juce::Array<SectionDef> currentSections() const;
+    void adoptSections(const juce::Array<SectionDef>& sections); // call under editLock
 
     // Returns the chain that should be the target of all message-thread edits.
     // During a crossfade this is fadeInList (the incoming template), not activeList
@@ -173,6 +192,7 @@ private:
     static void runList(const SlotList& list, juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi);
 
     juce::AudioPluginFormatManager& formatManager;
+    InstanceFactory instanceFactory;
 
     std::vector<SectionDef> sectionDefs;
     int nextSectionId   = 2;   // 1 is reserved for the default "Stomp 1"
@@ -188,7 +208,8 @@ private:
     std::atomic<int> requestedFadeSamples { 0 };
     std::atomic<juce::uint32> transitionEpoch { 0 };
 
-    std::map<int, std::shared_ptr<SlotList>> preloaded;   // message-thread: chains built ahead
+    struct PreloadedChain { std::shared_ptr<SlotList> slots; juce::Array<SectionDef> sections; int nextSlotId; };
+    std::map<int, PreloadedChain> preloaded;   // message-thread: staged chains built ahead
     int nextPreloadHandle = 1;
 
     class PluginLoaderThread;
@@ -200,7 +221,7 @@ private:
     std::vector<std::unique_ptr<PluginLoaderThread>> loaderGraveyard;
 
     void commitAsyncBuild(const juce::Array<SectionDef>& sections,
-                          std::shared_ptr<SlotList> partial,
+                          std::shared_ptr<SlotList> staged,
                           int epoch, int newNextSlotId,
                           std::function<void(int, bool)> onComplete,
                           bool allOk);

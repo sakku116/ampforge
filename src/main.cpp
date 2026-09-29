@@ -69,8 +69,7 @@ private:
     void saveWindowState()
     {
         if (auto* mc = dynamic_cast<MainComponent*>(getContentComponent()))
-            if (auto* s = mc->getAppSettingsFile())
-                s->setValue(kWindowStateKey, getWindowStateAsString());
+            mc->saveWindowState(getWindowStateAsString());
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)

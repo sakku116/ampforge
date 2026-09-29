@@ -10,6 +10,8 @@
 #include "KeyboardControlController.h"
 #include "KeyboardCaptureAdapter.h"
 #include "TemplateManager.h"
+#include "TemplateRecallController.h"
+#include "SettingsSafety.h"
 #include "ToneForgeLookAndFeel.h"
 #include "ChainListBox.h"
 #include "ProcessCpuMeter.h"
@@ -244,6 +246,7 @@ private:
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void initialiseSettings();
+    juce::PropertiesFile::Options settingsOptions;
     void openAudioSettings();
     void saveAudioDeviceState();
     void tryRestoreAudioDeviceState();
@@ -301,11 +304,14 @@ private:
     void updateTemplate();
     void renameCurrentTemplate();
     void deleteTemplate();
-    void recallTemplate(int index);
+    void recallTemplate(int index, bool explicitAction = true);
     void stepTemplate(int delta);
     void refreshTemplateSelector();
-    void saveTemplates();
+    bool saveTemplates(bool reportFailure = true);
     void restoreTemplates();
+    void showSettingsRecoveryDialog(const juce::String& path);
+    void retrySettingsRecovery();
+    void confirmSettingsReset(const juce::String& path);
 
     // Control mapping UI (Phase 4.7)
     void armActionLearn(const ControlAction& action);
@@ -314,7 +320,6 @@ private:
     void clearMappings();
     void updateControlLabel();
     void saveControlMap();
-    void restoreControlMap();
 
     // Android Controller Bridge (Phase 4.8)
     void updateControllerStatus();
@@ -356,6 +361,7 @@ private:
     juce::TextButton deleteTemplateButton;
     juce::TextButton prevTemplateButton;
     juce::TextButton nextTemplateButton;
+    juce::TextButton settingsRecoveryButton { "Repair Settings" };
     juce::TooltipWindow tooltipWindow { this, 600 };
     juce::ComboBox   templateSelector;
     juce::Label      templateDirtyLabel;   // "●" shown when current chain differs from active template
@@ -404,16 +410,28 @@ private:
 
     // ── Template dirty tracking ───────────────────────────────────────────────
     bool templateDirty = false;
+    bool templatesRestoreFailed = false;
+    bool settingsUnsafe = false;
+    SettingsSafety::RecoveredSettings recoveredSettings;
+    SettingsSafety::TemplateSave templateSaveState;
     void setTemplateDirty(bool dirty);
+    bool blockProtectedTemplateAction();
+    bool settingsWritesBlocked() const
+    {
+        return settingsUnsafe || recoveredSettings.blocksWrites() || templateSaveState.hasFailed();
+    }
+    void updateSettingsSafetyUi();
 
     // ── Async chain loading state ─────────────────────────────────────────────
     bool chainIsLoading = false;
+
     juce::Label chainLoadingLabel;
     void setChainLoading(bool loading, int loaded, int total);
 
     // ── Live control ───────────────────────────────────────────────────────────
     ControlMap controlMap;
     TemplateManager templateManager;
+    TemplateRecallController templateRecallController;
     std::atomic<bool> midiLearnArmed { false };
     ControlAction pendingLearnAction;   // action to bind when the next trigger arrives
     std::atomic<bool> expressionLearnArmed { false };
@@ -444,6 +462,7 @@ private:
 
 public:
     juce::PropertiesFile* getAppSettingsFile() { return appProperties.getUserSettings(); }
+    void saveWindowState(const juce::String& state);
 
 private:
     static constexpr const char* audioDeviceStateKey  = "audioDeviceState";

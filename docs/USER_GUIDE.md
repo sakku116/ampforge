@@ -148,7 +148,7 @@ Saves and loads a complete snapshot of the signal chain to a `.tfpreset` file.
 - **Save** — save the current chain (choose a file location)
 - **Load** — load an existing `.tfpreset` file
 
-A preset stores all sections and their order, every plugin, plugin state, individual slot bypass status, section bypass status, and control bindings. Bindings survive section reordering because they track stable slot IDs, not positional indexes.
+A Preset File stores all sections and their order, every plugin, plugin state, individual slot bypass status, section bypass status, and stable slot IDs. It does not store Control Map bindings; Templates store their own Control Map.
 
 Default preset folder: `%APPDATA%\AmpForge\presets\`
 
